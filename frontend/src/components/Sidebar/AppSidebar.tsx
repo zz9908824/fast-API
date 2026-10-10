@@ -1,4 +1,4 @@
-import { Briefcase, Home, Users } from "lucide-react"
+import { Briefcase, ClipboardList, Home, Search, ShieldCheck, Users } from "lucide-react"
 
 import { SidebarAppearance } from "@/components/Common/Appearance"
 import { Logo } from "@/components/Common/Logo"
@@ -14,6 +14,8 @@ import { User } from "./User"
 
 const baseItems: Item[] = [
   { icon: Home, title: "控制台", path: "/" },
+  { icon: Search, title: "事项查询", path: "/services" },
+  { icon: ClipboardList, title: "我的办件", path: "/applications" },
   { icon: Briefcase, title: "记录管理", path: "/items" },
 ]
 
@@ -21,7 +23,7 @@ export function AppSidebar() {
   const { user: currentUser } = useAuth()
 
   const items = currentUser?.is_superuser
-    ? [...baseItems, { icon: Users, title: "用户管理", path: "/admin" }]
+    ? [...baseItems, { icon: ShieldCheck, title: "复核任务", path: "/staff/tasks" }, { icon: Users, title: "用户管理", path: "/admin" }, { icon: Briefcase, title: "事项配置", path: "/admin/matters" }]
     : baseItems
 
   return (
