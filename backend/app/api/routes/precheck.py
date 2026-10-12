@@ -17,8 +17,17 @@ from sqlalchemy import text
 from app.api.deps import CurrentUser, SessionDep
 from app.schemas.precheck import (
     ApplicationCreate,
+    MatterVersionPublish,
+    MatterStatusConfigUpdate,
+    MaterialAcquisitionMethodCreate,
+    MaterialAcquisitionMethodUpdate,
+    MaterialRequirementCreate,
+    MaterialRequirementUpdate,
+    PolicySourceConfigUpdate,
     ParticipantCreate,
     PreparationItemUpdate,
+    ReviewSectionUpdate,
+    ServiceLocationConfigUpdate,
     ScenarioUpdate,
 )
 
@@ -54,6 +63,483 @@ def require_revision(app: dict, expected_revision: int) -> None:
         raise HTTPException(status_code=409, detail="办件内容已被更新，请刷新后重试")
 
 
+def require_administrator(current_user: CurrentUser) -> None:
+    if not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="仅管理员可以审核和发布事项")
+
+
+@router.get("/admin/matter-versions/drafts")
+def list_draft_matter_versions(
+    session: SessionDep, current_user: CurrentUser
+) -> dict:
+    """Return the complete review context for administrator-held draft versions."""
+    require_administrator(current_user)
+    versions = rows(session, """
+        SELECT mv.id AS version_id, mv.version_no, mv.status, mv.config_revision,
+          mv.change_summary, mv.metadata_json, mv.created_at, mv.updated_at,
+          sm.id AS matter_id, sm.code AS matter_code, sm.official_code,
+          sm.name AS matter_name, sm.region_code, sm.region_name, sm.description,
+          sl.id AS location_id, sl.name AS location_name, sl.address, sl.source_id,
+          sl.phone, sl.opening_hours, sl.official_entry_url,
+          sl.verification_status AS location_verification_status, sl.checked_at AS location_checked_at,
+          ps.id AS source_id, ps.title AS source_title, ps.url AS source_url,
+          ps.publisher AS source_publisher,
+          ps.verification_status AS source_verification_status,
+          COALESCE((
+            SELECT jsonb_agg(jsonb_build_object(
+              'id', mr.id, 'name', mr.name, 'requirement_code', mr.requirement_code,
+              'level', mr.requirement_level, 'submission_mode', mr.submission_mode,
+              'format_requirements', mr.format_requirements,
+              'verification_status', mr.verification_status,
+              'material_type_id', mt.id,
+              'material_type', mt.name
+            ) ORDER BY mr.sort_order, mr.requirement_code)
+            FROM material_requirements mr
+            JOIN material_types mt ON mt.id = mr.material_type_id
+            WHERE mr.matter_version_id = mv.id
+          ), '[]'::jsonb) AS materials,
+          COALESCE((
+            SELECT jsonb_agg(jsonb_build_object(
+              'id', mam.id, 'requirement_id', mr.id, 'material_name', mr.name,
+              'title', mam.title, 'method_type', mam.method_type,
+              'steps', mam.steps, 'entry_url', mam.entry_url,
+              'verification_status', mam.verification_status
+            ) ORDER BY mam.sort_order, mam.method_code)
+            FROM material_acquisition_methods mam
+            JOIN material_requirements mr ON mr.id = mam.requirement_id
+            WHERE mr.matter_version_id = mv.id
+          ), '[]'::jsonb) AS acquisition_methods
+        FROM matter_versions mv
+        JOIN service_matters sm ON sm.id = mv.matter_id
+        LEFT JOIN service_locations sl ON sl.id = mv.service_location_id
+        LEFT JOIN policy_sources ps ON ps.id = sl.source_id
+        WHERE mv.status = 'draft'
+        ORDER BY mv.created_at ASC, sm.name
+    """)
+    return envelope({"items": versions, "count": len(versions)})
+
+
+@router.post("/admin/matter-versions/{version_id}/publish")
+def publish_matter_version(
+    version_id: uuid.UUID,
+    payload: MatterVersionPublish,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> dict:
+    """Release a fully verified draft with optimistic locking on configuration revision."""
+    require_administrator(current_user)
+    verification = one(session, """
+        SELECT
+          EXISTS(
+            SELECT 1 FROM service_locations sl
+            JOIN policy_sources ps ON ps.id = sl.source_id
+            WHERE sl.id = mv.service_location_id AND ps.verification_status = 'verified'
+          ) AS source_verified,
+          EXISTS(
+            SELECT 1 FROM service_locations sl
+            WHERE sl.id = mv.service_location_id AND sl.verification_status = 'verified'
+          ) AS location_verified,
+          EXISTS(SELECT 1 FROM material_requirements mr WHERE mr.matter_version_id = mv.id)
+            AND NOT EXISTS(
+              SELECT 1 FROM material_requirements mr
+              WHERE mr.matter_version_id = mv.id AND mr.verification_status <> 'verified'
+            ) AS materials_verified,
+          EXISTS(
+            SELECT 1 FROM material_acquisition_methods mam
+            JOIN material_requirements mr ON mr.id = mam.requirement_id
+            WHERE mr.matter_version_id = mv.id
+          ) AND NOT EXISTS(
+            SELECT 1 FROM material_acquisition_methods mam
+            JOIN material_requirements mr ON mr.id = mam.requirement_id
+            WHERE mr.matter_version_id = mv.id AND mam.verification_status <> 'verified'
+          ) AS acquisition_verified
+        FROM matter_versions mv WHERE mv.id = :version_id
+    """, {"version_id": version_id})
+    if not verification:
+        raise HTTPException(status_code=404, detail="事项版本不存在")
+    unfinished = []
+    if not verification["source_verified"]:
+        unfinished.append("官方网页与来源")
+    if not verification["location_verified"]:
+        unfinished.append("办理地点与联系电话")
+    if not verification["materials_verified"]:
+        unfinished.append("材料要求")
+    if not verification["acquisition_verified"]:
+        unfinished.append("材料获取方式与线上渠道")
+    if unfinished:
+        raise HTTPException(status_code=409, detail=f"无法发布，以下内容尚未核验为 verified：{'、'.join(unfinished)}")
+    published = one(session, """
+        UPDATE matter_versions
+        SET status = 'finished', approved_by = :administrator_id, published_at = now(),
+          source_checked_at = now(), config_revision = config_revision + 1,
+          updated_at = now()
+        WHERE id = :version_id AND status = 'draft'
+          AND config_revision = :expected_config_revision
+        RETURNING id, matter_id, version_no, status, config_revision, published_at
+    """, {
+        "version_id": version_id,
+        "administrator_id": current_user.id,
+        "expected_config_revision": payload.expected_config_revision,
+    })
+    if not published:
+        version = one(session, "SELECT status, config_revision FROM matter_versions WHERE id = :id", {"id": version_id})
+        if not version:
+            raise HTTPException(status_code=404, detail="事项版本不存在")
+        if version["status"] != "draft":
+            raise HTTPException(status_code=409, detail="该事项版本不是待审核草稿，不能再次发布")
+        raise HTTPException(status_code=409, detail="事项配置已被其他管理员修改，请刷新后重新核对")
+    session.commit()
+    return envelope(published)
+
+
+@router.patch("/admin/matter-versions/{version_id}/review-sections/{section}")
+def update_review_section_note(
+    version_id: uuid.UUID, section: str, payload: ReviewSectionUpdate,
+    session: SessionDep, current_user: CurrentUser,
+) -> dict:
+    """Save a concise administrator review note for one configured section."""
+    require_administrator(current_user)
+    allowed_sections = {"status", "source", "location", "materials", "acquisition"}
+    if section not in allowed_sections:
+        raise HTTPException(status_code=404, detail="不存在的审核区块")
+    version = one(session, "SELECT metadata_json, config_revision, status FROM matter_versions WHERE id = :id", {"id": version_id})
+    if not version:
+        raise HTTPException(status_code=404, detail="事项版本不存在")
+    if version["status"] != "draft":
+        raise HTTPException(status_code=409, detail="仅草稿事项可以编辑审核备注")
+    if version["config_revision"] != payload.expected_config_revision:
+        raise HTTPException(status_code=409, detail="事项配置已更新，请刷新后重试")
+    metadata = dict(version["metadata_json"] or {})
+    notes = dict(metadata.get("review_notes") or {})
+    notes[section] = payload.note.strip()
+    metadata["review_notes"] = notes
+    updated = one(session, """
+        UPDATE matter_versions SET metadata_json = CAST(:metadata AS jsonb),
+          config_revision = config_revision + 1, updated_at = now()
+        WHERE id = :id AND config_revision = :revision
+        RETURNING config_revision
+    """, {"id": version_id, "revision": payload.expected_config_revision,
+           "metadata": json.dumps(metadata, ensure_ascii=False)})
+    if not updated:
+        raise HTTPException(status_code=409, detail="事项配置已更新，请刷新后重试")
+    session.commit()
+    return envelope({"section": section, "note": notes[section], "config_revision": updated["config_revision"]})
+
+
+@router.patch("/admin/matter-versions/{version_id}/status-config")
+def update_matter_status_config(
+    version_id: uuid.UUID, payload: MatterStatusConfigUpdate,
+    session: SessionDep, current_user: CurrentUser,
+) -> dict:
+    """Edit the public-facing acceptance scope of a draft matter version."""
+    require_administrator(current_user)
+    version = one(session, "SELECT metadata_json, config_revision, status FROM matter_versions WHERE id = :id", {"id": version_id})
+    if not version:
+        raise HTTPException(status_code=404, detail="事项版本不存在")
+    if version["status"] != "draft" or version["config_revision"] != payload.expected_config_revision:
+        raise HTTPException(status_code=409, detail="事项状态或配置已更新，请刷新后重试")
+    metadata = dict(version["metadata_json"] or {})
+    metadata["acceptance_condition_raw"] = payload.acceptance_condition_raw.strip()
+    metadata["channels"] = [value.strip() for value in payload.channels if value.strip()]
+    metadata["uncertainties"] = [value.strip() for value in payload.uncertainties if value.strip()]
+    updated = one(session, """
+        UPDATE matter_versions SET metadata_json = CAST(:metadata AS jsonb),
+          config_revision = config_revision + 1, updated_at = now()
+        WHERE id = :id AND config_revision = :revision
+        RETURNING config_revision, metadata_json
+    """, {"id": version_id, "revision": payload.expected_config_revision,
+           "metadata": json.dumps(metadata, ensure_ascii=False)})
+    if not updated:
+        raise HTTPException(status_code=409, detail="事项配置已更新，请刷新后重试")
+    session.commit()
+    return envelope(updated)
+
+
+@router.patch("/admin/matter-versions/{version_id}/source-config")
+def update_policy_source_config(
+    version_id: uuid.UUID, payload: PolicySourceConfigUpdate,
+    session: SessionDep, current_user: CurrentUser,
+) -> dict:
+    """Edit the publisher and portal URL associated with a draft matter version."""
+    require_administrator(current_user)
+    version = one(session, """
+        SELECT mv.config_revision, mv.status, sl.source_id
+        FROM matter_versions mv LEFT JOIN service_locations sl ON sl.id = mv.service_location_id
+        WHERE mv.id = :id
+    """, {"id": version_id})
+    if not version or not version["source_id"]:
+        raise HTTPException(status_code=404, detail="事项版本未关联可编辑的官方来源")
+    if version["status"] != "draft" or version["config_revision"] != payload.expected_config_revision:
+        raise HTTPException(status_code=409, detail="事项状态或配置已更新，请刷新后重试")
+    session.execute(text("""
+        UPDATE policy_sources SET publisher = :publisher, url = :url
+        WHERE id = :source_id
+    """), {"publisher": payload.publisher.strip() or None, "url": payload.url.strip(), "source_id": version["source_id"]})
+    updated = one(session, """
+        UPDATE matter_versions SET config_revision = config_revision + 1, updated_at = now()
+        WHERE id = :id AND config_revision = :revision
+        RETURNING config_revision
+    """, {"id": version_id, "revision": payload.expected_config_revision})
+    if not updated:
+        raise HTTPException(status_code=409, detail="事项配置已更新，请刷新后重试")
+    session.commit()
+    return envelope({"publisher": payload.publisher.strip(), "url": payload.url.strip(), "config_revision": updated["config_revision"]})
+
+
+@router.patch("/admin/matter-versions/{version_id}/location-config")
+def update_service_location_config(
+    version_id: uuid.UUID, payload: ServiceLocationConfigUpdate,
+    session: SessionDep, current_user: CurrentUser,
+) -> dict:
+    """Edit the service-location fields linked to one draft matter version."""
+    require_administrator(current_user)
+    version = one(session, "SELECT config_revision, status, service_location_id FROM matter_versions WHERE id = :id", {"id": version_id})
+    if not version or not version["service_location_id"]:
+        raise HTTPException(status_code=404, detail="事项版本未关联可编辑的办理地点")
+    if version["status"] != "draft" or version["config_revision"] != payload.expected_config_revision:
+        raise HTTPException(status_code=409, detail="事项状态或配置已更新，请刷新后重试")
+    if payload.source_id and not one(session, "SELECT id FROM policy_sources WHERE id = :id", {"id": payload.source_id}):
+        raise HTTPException(status_code=404, detail="指定的信息来源不存在")
+    session.execute(text("""
+        UPDATE service_locations SET name = :name, address = :address, phone = :phone,
+          opening_hours = :opening_hours, official_entry_url = :official_entry_url,
+          verification_status = :verification_status, checked_at = :checked_at,
+          source_id = :source_id
+        WHERE id = :location_id
+    """), {
+        "location_id": version["service_location_id"], "name": payload.name.strip(),
+        "address": payload.address.strip() if payload.address else None,
+        "phone": payload.phone.strip() if payload.phone else None,
+        "opening_hours": payload.opening_hours.strip() if payload.opening_hours else None,
+        "official_entry_url": payload.official_entry_url.strip() if payload.official_entry_url else None,
+        "verification_status": payload.verification_status, "checked_at": payload.checked_at,
+        "source_id": payload.source_id,
+    })
+    updated = one(session, """
+        UPDATE matter_versions SET config_revision = config_revision + 1, updated_at = now()
+        WHERE id = :id AND config_revision = :revision RETURNING config_revision
+    """, {"id": version_id, "revision": payload.expected_config_revision})
+    if not updated:
+        raise HTTPException(status_code=409, detail="事项配置已更新，请刷新后重试")
+    session.commit()
+    return envelope({"config_revision": updated["config_revision"]})
+
+
+def draft_version_for_material_change(session: SessionDep, version_id: uuid.UUID, revision: int) -> dict:
+    version = one(session, "SELECT id, config_revision, status FROM matter_versions WHERE id = :id", {"id": version_id})
+    if not version:
+        raise HTTPException(status_code=404, detail="事项版本不存在")
+    if version["status"] != "draft" or version["config_revision"] != revision:
+        raise HTTPException(status_code=409, detail="事项状态或配置已更新，请刷新后重试")
+    return version
+
+
+def advance_material_config_revision(session: SessionDep, version_id: uuid.UUID, revision: int) -> None:
+    updated = one(session, """
+        UPDATE matter_versions SET config_revision = config_revision + 1, updated_at = now()
+        WHERE id = :id AND config_revision = :revision RETURNING config_revision
+    """, {"id": version_id, "revision": revision})
+    if not updated:
+        raise HTTPException(status_code=409, detail="事项配置已更新，请刷新后重试")
+
+
+@router.post("/admin/matter-versions/{version_id}/material-requirements", status_code=status.HTTP_201_CREATED)
+def create_material_requirement(
+    version_id: uuid.UUID, payload: MaterialRequirementCreate,
+    session: SessionDep, current_user: CurrentUser,
+) -> dict:
+    require_administrator(current_user)
+    draft_version_for_material_change(session, version_id, payload.expected_config_revision)
+    if not one(session, "SELECT id FROM material_types WHERE id = :id", {"id": payload.material_type_id}):
+        raise HTTPException(status_code=404, detail="材料类型不存在")
+    requirement_id = uuid.uuid4()
+    code = f"custom_{requirement_id.hex[:16]}"
+    session.execute(text("""
+        INSERT INTO material_requirements(
+          id, matter_version_id, material_type_id, requirement_code, name,
+          requirement_level, provider_role, submission_mode, format_requirements
+        ) VALUES (:id, :version_id, :type_id, :code, :name, :level, 'applicant', 'user_upload', :format)
+    """), {"id": requirement_id, "version_id": version_id, "type_id": payload.material_type_id,
+           "code": code, "name": payload.name.strip(), "level": payload.requirement_level,
+           "format": payload.format_requirements.strip() if payload.format_requirements else None})
+    advance_material_config_revision(session, version_id, payload.expected_config_revision)
+    session.commit()
+    return envelope({"id": requirement_id, "name": payload.name.strip(), "verification_status": "pending"})
+
+
+@router.patch("/admin/matter-versions/{version_id}/material-requirements/{requirement_id}")
+def update_material_requirement(
+    version_id: uuid.UUID, requirement_id: uuid.UUID, payload: MaterialRequirementUpdate,
+    session: SessionDep, current_user: CurrentUser,
+) -> dict:
+    require_administrator(current_user)
+    draft_version_for_material_change(session, version_id, payload.expected_config_revision)
+    changed = one(session, """
+        UPDATE material_requirements SET name = :name, requirement_level = :level,
+          format_requirements = :format, verification_status = 'pending',
+          verified_by = NULL, verified_at = NULL
+        WHERE id = :id AND matter_version_id = :version_id
+        RETURNING id
+    """, {"id": requirement_id, "version_id": version_id, "name": payload.name.strip(),
+           "level": payload.requirement_level,
+           "format": payload.format_requirements.strip() if payload.format_requirements else None})
+    if not changed:
+        raise HTTPException(status_code=404, detail="材料要求不属于当前事项版本")
+    advance_material_config_revision(session, version_id, payload.expected_config_revision)
+    session.commit()
+    return envelope({"id": requirement_id, "verification_status": "pending"})
+
+
+@router.delete("/admin/matter-versions/{version_id}/material-requirements/{requirement_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_material_requirement(
+    version_id: uuid.UUID, requirement_id: uuid.UUID, *,
+    expected_config_revision: int = Query(gt=0), session: SessionDep, current_user: CurrentUser,
+) -> None:
+    require_administrator(current_user)
+    draft_version_for_material_change(session, version_id, expected_config_revision)
+    linked = one(session, """
+        SELECT EXISTS(SELECT 1 FROM application_documents WHERE requirement_id = :id)
+          OR EXISTS(SELECT 1 FROM issue_evidence WHERE requirement_id = :id) AS exists
+    """, {"id": requirement_id})
+    if linked and linked["exists"]:
+        raise HTTPException(status_code=409, detail="该材料要求已有办件材料或历史证据，不能删除")
+    session.execute(text("DELETE FROM material_acquisition_methods WHERE requirement_id = :id"), {"id": requirement_id})
+    deleted = session.execute(text("DELETE FROM material_requirements WHERE id = :id AND matter_version_id = :version_id"), {"id": requirement_id, "version_id": version_id})
+    if deleted.rowcount != 1:
+        raise HTTPException(status_code=404, detail="材料要求不属于当前事项版本")
+    advance_material_config_revision(session, version_id, expected_config_revision)
+    session.commit()
+
+
+def requirement_belongs_to_version(session: SessionDep, requirement_id: uuid.UUID, version_id: uuid.UUID) -> None:
+    if not one(session, "SELECT id FROM material_requirements WHERE id = :id AND matter_version_id = :version_id", {"id": requirement_id, "version_id": version_id}):
+        raise HTTPException(status_code=404, detail="关联材料不属于当前事项版本")
+
+
+@router.post("/admin/matter-versions/{version_id}/acquisition-methods", status_code=status.HTTP_201_CREATED)
+def create_material_acquisition_method(
+    version_id: uuid.UUID, payload: MaterialAcquisitionMethodCreate,
+    session: SessionDep, current_user: CurrentUser,
+) -> dict:
+    """Create one material acquisition method for a draft matter version."""
+    require_administrator(current_user)
+    draft_version_for_material_change(session, version_id, payload.expected_config_revision)
+    requirement_belongs_to_version(session, payload.requirement_id, version_id)
+    method_id = uuid.uuid4()
+    session.execute(text("""
+        INSERT INTO material_acquisition_methods(
+          id, requirement_id, method_code, method_type, title, steps, entry_url
+        ) VALUES (:id, :requirement_id, :code, :method_type, :title, :steps, :entry_url)
+    """), {"id": method_id, "requirement_id": payload.requirement_id,
+           "code": f"custom_{method_id.hex[:16]}", "method_type": payload.method_type,
+           "title": payload.title.strip(), "steps": payload.steps.strip() if payload.steps else None,
+           "entry_url": payload.entry_url.strip() if payload.entry_url else None})
+    advance_material_config_revision(session, version_id, payload.expected_config_revision)
+    session.commit()
+    return envelope({"id": method_id, "verification_status": "pending"})
+
+
+@router.patch("/admin/matter-versions/{version_id}/acquisition-methods/{method_id}")
+def update_material_acquisition_method(
+    version_id: uuid.UUID, method_id: uuid.UUID, payload: MaterialAcquisitionMethodUpdate,
+    session: SessionDep, current_user: CurrentUser,
+) -> dict:
+    """Update one acquisition method and require it to be verified again."""
+    require_administrator(current_user)
+    draft_version_for_material_change(session, version_id, payload.expected_config_revision)
+    requirement_belongs_to_version(session, payload.requirement_id, version_id)
+    changed = one(session, """
+        UPDATE material_acquisition_methods SET requirement_id = :requirement_id,
+          method_type = :method_type, title = :title, steps = :steps, entry_url = :entry_url,
+          verification_status = 'pending'
+        WHERE id = :id AND requirement_id IN (
+          SELECT id FROM material_requirements WHERE matter_version_id = :version_id
+        ) RETURNING id
+    """, {"id": method_id, "version_id": version_id, "requirement_id": payload.requirement_id,
+           "method_type": payload.method_type, "title": payload.title.strip(),
+           "steps": payload.steps.strip() if payload.steps else None,
+           "entry_url": payload.entry_url.strip() if payload.entry_url else None})
+    if not changed:
+        raise HTTPException(status_code=404, detail="材料获取方式不属于当前事项版本")
+    advance_material_config_revision(session, version_id, payload.expected_config_revision)
+    session.commit()
+    return envelope({"id": method_id, "verification_status": "pending"})
+
+
+@router.delete("/admin/matter-versions/{version_id}/acquisition-methods/{method_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_material_acquisition_method(
+    version_id: uuid.UUID, method_id: uuid.UUID, *, expected_config_revision: int = Query(gt=0),
+    session: SessionDep, current_user: CurrentUser,
+) -> None:
+    require_administrator(current_user)
+    draft_version_for_material_change(session, version_id, expected_config_revision)
+    deleted = session.execute(text("""
+        DELETE FROM material_acquisition_methods WHERE id = :id AND requirement_id IN (
+          SELECT id FROM material_requirements WHERE matter_version_id = :version_id
+        )
+    """), {"id": method_id, "version_id": version_id})
+    if deleted.rowcount != 1:
+        raise HTTPException(status_code=404, detail="材料获取方式不属于当前事项版本")
+    advance_material_config_revision(session, version_id, expected_config_revision)
+    session.commit()
+
+
+@router.post("/admin/matter-versions/{version_id}/review-sections/{section}/confirm")
+def confirm_review_section(
+    version_id: uuid.UUID, section: str, payload: MatterVersionPublish,
+    session: SessionDep, current_user: CurrentUser,
+) -> dict:
+    """Record an administrator confirmation and update the related verification flag."""
+    require_administrator(current_user)
+    allowed_sections = {"status", "source", "location", "materials", "acquisition"}
+    if section not in allowed_sections:
+        raise HTTPException(status_code=404, detail="不存在的审核区块")
+    version = one(session, """
+        SELECT mv.metadata_json, mv.config_revision, mv.status, mv.service_location_id
+        FROM matter_versions mv WHERE mv.id = :id
+    """, {"id": version_id})
+    if not version:
+        raise HTTPException(status_code=404, detail="事项版本不存在")
+    if version["status"] != "draft" or version["config_revision"] != payload.expected_config_revision:
+        raise HTTPException(status_code=409, detail="事项状态或配置已更新，请刷新后重试")
+    if section == "source":
+        session.execute(text("""
+            UPDATE policy_sources SET verification_status = 'verified', verified_by = :user_id, verified_at = now()
+            WHERE id = (SELECT source_id FROM service_locations WHERE id = :location_id)
+        """), {"user_id": current_user.id, "location_id": version["service_location_id"]})
+    elif section == "location":
+        session.execute(text("""
+            UPDATE service_locations SET verification_status = 'verified', checked_at = now()
+            WHERE id = :location_id
+        """), {"location_id": version["service_location_id"]})
+    elif section == "acquisition":
+        session.execute(text("""
+            UPDATE material_acquisition_methods SET verification_status = 'verified'
+            WHERE requirement_id IN (SELECT id FROM material_requirements WHERE matter_version_id = :version_id)
+        """), {"version_id": version_id})
+    elif section == "materials":
+        session.execute(text("""
+            UPDATE material_requirements
+            SET verification_status = 'verified', verified_by = :user_id, verified_at = now()
+            WHERE matter_version_id = :version_id
+        """), {"version_id": version_id, "user_id": current_user.id})
+    metadata = dict(version["metadata_json"] or {})
+    confirmations = dict(metadata.get("review_confirmations") or {})
+    confirmations[section] = {"confirmed_by": str(current_user.id), "confirmed_at": datetime.now(UTC).isoformat()}
+    metadata["review_confirmations"] = confirmations
+    updated = one(session, """
+        UPDATE matter_versions SET metadata_json = CAST(:metadata AS jsonb),
+          config_revision = config_revision + 1, updated_at = now()
+        WHERE id = :id AND config_revision = :revision
+        RETURNING config_revision
+    """, {"id": version_id, "revision": payload.expected_config_revision,
+           "metadata": json.dumps(metadata, ensure_ascii=False)})
+    if not updated:
+        raise HTTPException(status_code=409, detail="事项配置已更新，请刷新后重试")
+    session.commit()
+    return envelope({"section": section, "config_revision": updated["config_revision"]})
+
+
 @router.get("/matters")
 def list_matters(
     session: SessionDep,
@@ -75,7 +561,7 @@ def list_matters(
         FROM service_matters sm
         JOIN LATERAL (
           SELECT id, version_no, valid_from, valid_to FROM matter_versions
-          WHERE matter_id = sm.id AND status = 'published'
+          WHERE matter_id = sm.id AND status IN ('finished', 'published')
           ORDER BY version_no DESC LIMIT 1
         ) mv ON true
         WHERE {' AND '.join(clauses)}
@@ -83,15 +569,85 @@ def list_matters(
     """, params))
 
 
+@router.get("/matters/search")
+def search_matters(
+    session: SessionDep,
+    q: str = Query(default="", max_length=100),
+) -> dict:
+    """Search published matters and their public material-guide configuration.
+
+    A keyword may match the matter itself, its region, a material requirement,
+    an acquisition guide, a published location, or a verified source. Draft
+    versions are intentionally excluded from this public endpoint.
+    """
+    keyword = q.strip()
+    params = {"pattern": f"%{keyword}%"}
+    cards = rows(session, """
+        SELECT sm.id, sm.code, sm.name, sm.region_code, sm.region_name AS region,
+          sm.description, mv.id AS version_id, mv.version_no,
+          COALESCE(sl.name, '办理地点待确认') AS location,
+          COALESCE(mv.source_checked_at, mv.updated_at)::date AS checked_at,
+          CASE
+            WHEN mv.metadata_json ->> 'online_precheck_available' = 'true' THEN true
+            WHEN mv.metadata_json ->> 'configuration_kind' = 'synthetic_pilot' THEN true
+            ELSE false
+          END AS supported,
+          (SELECT count(*) FROM material_requirements mr
+            WHERE mr.matter_version_id = mv.id) AS material_count
+        FROM service_matters sm
+        JOIN LATERAL (
+          SELECT * FROM matter_versions
+          WHERE matter_id = sm.id AND status IN ('finished', 'published')
+          ORDER BY version_no DESC LIMIT 1
+        ) mv ON true
+        LEFT JOIN service_locations sl ON sl.id = mv.service_location_id
+        WHERE sm.is_active = true
+          AND (
+            :pattern = '%%'
+            OR sm.name ILIKE :pattern
+            OR sm.code ILIKE :pattern
+            OR sm.region_name ILIKE :pattern
+            OR sm.region_code ILIKE :pattern
+            OR COALESCE(sl.name, '') ILIKE :pattern
+            OR COALESCE(sl.address, '') ILIKE :pattern
+            OR EXISTS (
+              SELECT 1 FROM material_requirements mr
+              JOIN material_types mt ON mt.id = mr.material_type_id
+              LEFT JOIN policy_sources ps ON ps.id = mr.template_source_id
+                AND ps.verification_status = 'verified'
+              WHERE mr.matter_version_id = mv.id AND (
+                mr.name ILIKE :pattern OR mr.requirement_code ILIKE :pattern
+                OR mt.name ILIKE :pattern OR COALESCE(ps.title, '') ILIKE :pattern
+                OR COALESCE(ps.content_text, '') ILIKE :pattern
+              )
+            )
+            OR EXISTS (
+              SELECT 1 FROM material_acquisition_methods mam
+              LEFT JOIN policy_sources ps ON ps.id = mam.source_id
+                AND ps.verification_status = 'verified'
+              WHERE mam.requirement_id IN (
+                SELECT id FROM material_requirements WHERE matter_version_id = mv.id
+              ) AND (
+                mam.title ILIKE :pattern OR COALESCE(mam.steps, '') ILIKE :pattern
+                OR COALESCE(ps.title, '') ILIKE :pattern
+              )
+            )
+          )
+        ORDER BY sm.region_name, sm.name
+    """, params)
+    return envelope({"items": cards, "count": len(cards), "keyword": keyword})
+
+
 @router.get("/matters/{matter_id}")
 def get_matter(matter_id: uuid.UUID, session: SessionDep) -> dict:
     matter = one(session, """
         SELECT sm.id, sm.code, sm.official_code, sm.name, sm.region_code, sm.region_name,
                sm.description, mv.id AS version_id, mv.version_no, mv.valid_from, mv.valid_to,
+               mv.metadata_json,
                sl.name AS location_name, sl.address, sl.phone, sl.opening_hours, sl.official_entry_url
         FROM service_matters sm JOIN matter_versions mv ON mv.matter_id = sm.id
         LEFT JOIN service_locations sl ON sl.id = mv.service_location_id
-        WHERE sm.id = :id AND sm.is_active = true AND mv.status = 'published'
+        WHERE sm.id = :id AND sm.is_active = true AND mv.status IN ('finished', 'published')
         ORDER BY mv.version_no DESC LIMIT 1
     """, {"id": matter_id})
     if not matter:
@@ -114,7 +670,7 @@ def list_acquisition_methods(
     """Publicly expose only verified guidance belonging to a published version."""
     version = one(session, """
         SELECT mv.id FROM matter_versions mv JOIN service_matters sm ON sm.id = mv.matter_id
-        WHERE mv.id = :version_id AND mv.status = 'published' AND sm.is_active = true
+        WHERE mv.id = :version_id AND mv.status IN ('finished', 'published') AND sm.is_active = true
     """, {"version_id": version_id})
     if not version:
         raise HTTPException(status_code=404, detail="未找到已发布事项版本")
@@ -164,7 +720,7 @@ def create_application(
         return envelope(saved["response_json"])
     version = one(session, """
         SELECT id FROM matter_versions WHERE id = :version_id AND matter_id = :matter_id
-          AND status = 'published'
+          AND status IN ('finished', 'published')
     """, {"version_id": payload.matter_version_id, "matter_id": payload.matter_id})
     if not version:
         raise HTTPException(status_code=409, detail="事项版本不存在、未发布或不能新建办件")
