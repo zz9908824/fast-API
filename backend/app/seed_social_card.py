@@ -26,6 +26,20 @@ MINOR_IDENTITY_REQUIREMENT_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb80b"
 MINOR_GUARDIAN_REQUIREMENT_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb80c")
 MINOR_RELATIONSHIP_REQUIREMENT_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb80d")
 
+DAOWAI_SOURCE_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb810")
+DAOWAI_LOCATION_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb811")
+DAOWAI_MATTER_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb812")
+DAOWAI_VERSION_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb813")
+DAOWAI_REQUIREMENT_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb814")
+
+DAOWAI_MINOR_SOURCE_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb815")
+DAOWAI_MINOR_LOCATION_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb816")
+DAOWAI_MINOR_MATTER_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb817")
+DAOWAI_MINOR_VERSION_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb818")
+DAOWAI_MINOR_IDENTITY_REQUIREMENT_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb819")
+DAOWAI_MINOR_GUARDIAN_REQUIREMENT_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb81a")
+DAOWAI_MINOR_RELATIONSHIP_REQUIREMENT_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb81b")
+
 DETAIL_URL = (
     "https://www.zwfw.hlj.gov.cn/zhcx/bszn?syncItemId=848ba5e1-7f70-4e90-"
     "a35e-f1b4c21b8a3f&areaCode=230103000000"
@@ -369,4 +383,126 @@ def seed_minor_social_card_snapshot(session: Session, administrator_id: uuid.UUI
             "id": uuid.uuid4(), "requirement_id": requirement_ids[requirement_code], "code": code,
             "method_type": method_type, "title": title, "steps": steps, "source_id": MINOR_SOURCE_ID,
         })
+    session.commit()
+
+
+def seed_daowai_social_card_snapshots(session: Session, administrator_id: uuid.UUID) -> None:
+    """Create pending DaoWai drafts modelled on the Nangang data-entry structure.
+
+    No DaoWai official guide, address, phone number, or minor-specific rule is
+    asserted here.  Each value that needs local confirmation remains pending.
+    """
+    snapshots = [
+        {
+            "source_id": DAOWAI_SOURCE_ID, "location_id": DAOWAI_LOCATION_ID,
+            "matter_id": DAOWAI_MATTER_ID, "version_id": DAOWAI_VERSION_ID,
+            "code": "daowai_social_security_card_application", "name": "道外区社会保障卡申领",
+            "source_title": "道外区社会保障卡申领办事指南（待核验草稿）",
+            "description": "道外区社会保障卡申领录入草稿；参照南岗区数据结构，官方来源、地点和材料要求待核验。",
+            "acceptance": "道外区社会保障卡申领的受理条件、办理地点和材料要求待官方核验。",
+            "requirements": [
+                (DAOWAI_REQUIREMENT_ID, "identity_document", "resident_identity_card", "身份证", "参照社会保障卡申领结构录入；道外区是否支持共享获取及证件形式待官方核验。", 10),
+            ],
+            "methods": [
+                ("identity_prepare", "identity_document", "self_prepare", "准备身份证", "根据道外区官方要求准备身份证明；原件、复印件和共享方式待核验。"),
+                ("window_consult", "identity_document", "in_person", "前往道外区办理窗口咨询", "办理地点、窗口受理时间和是否支持线上办理待官方核验。"),
+            ],
+        },
+        {
+            "source_id": DAOWAI_MINOR_SOURCE_ID, "location_id": DAOWAI_MINOR_LOCATION_ID,
+            "matter_id": DAOWAI_MINOR_MATTER_ID, "version_id": DAOWAI_MINOR_VERSION_ID,
+            "code": "daowai_minor_social_security_card_application", "name": "道外区未成年社会保障卡申领",
+            "source_title": "道外区未成年社会保障卡申领办事指南（待核验草稿）",
+            "description": "道外区未成年社会保障卡申领录入草稿；监护人、关系证明和办理渠道均待官方核验。",
+            "acceptance": "道外区未成年人申领的监护人到场、身份证明和监护关系证明要求待官方核验。",
+            "requirements": [
+                (DAOWAI_MINOR_IDENTITY_REQUIREMENT_ID, "minor_identity_document", "resident_identity_card", "未成年人身份证明", "申请人身份信息或相关身份证明；具体可接受证件待官方核验。", 10),
+                (DAOWAI_MINOR_GUARDIAN_REQUIREMENT_ID, "guardian_identity_document", "guardian_identity_card", "监护人身份证", "监护人身份证明；是否必须提供原件及复印件待官方核验。", 20),
+                (DAOWAI_MINOR_RELATIONSHIP_REQUIREMENT_ID, "guardian_relationship", "guardian_relationship_proof", "监护关系证明", "出生医学证明、户口簿或其他证明的适用范围待官方核验。", 30),
+            ],
+            "methods": [
+                ("minor_identity_prepare", "minor_identity_document", "self_prepare", "准备未成年人身份证明", "根据道外区官方要求准备申请人身份证明；可接受证件范围待核验。"),
+                ("guardian_identity_prepare", "guardian_identity_document", "self_prepare", "准备监护人身份证", "根据道外区官方要求准备监护人身份证明；原件、复印件要求待核验。"),
+                ("relationship_proof_prepare", "guardian_relationship", "self_prepare", "准备监护关系证明", "准备可证明监护关系的材料；具体材料类型待官方核验。"),
+                ("minor_window_consult", "minor_identity_document", "in_person", "前往道外区办理窗口咨询", "办理地点、预约要求和申请人是否必须到场待官方核验。"),
+            ],
+        },
+    ]
+    material_types = {
+        row["code"]: row["id"] for row in session.execute(text("""
+            SELECT code, id FROM material_types
+            WHERE code IN ('resident_identity_card', 'guardian_identity_card', 'guardian_relationship_proof')
+        """)).mappings()
+    }
+    for snapshot in snapshots:
+        session.execute(text("""
+            INSERT INTO policy_sources(id, title, source_kind, url, publisher, content_text, verification_status)
+            VALUES (:id, :title, 'guide', :url, '待官方核验', :content, 'pending')
+            ON CONFLICT (id) DO NOTHING
+        """), {
+            "id": snapshot["source_id"], "title": snapshot["source_title"], "url": DETAIL_URL,
+            "content": "本记录参照南岗区社会保障卡申领数据结构创建；尚未采集或核验道外区官方办事指南，不构成办理依据。",
+        })
+        session.execute(text("""
+            INSERT INTO service_locations(id, name, region_code, official_entry_url, source_id, verification_status)
+            VALUES (:id, :name, '230104000000', :url, :source_id, 'pending')
+            ON CONFLICT (id) DO NOTHING
+        """), {
+            "id": snapshot["location_id"],
+            "name": "道外区社会保障卡办理地点（待官方核验）",
+            "url": DETAIL_URL, "source_id": snapshot["source_id"],
+        })
+        session.execute(text("""
+            INSERT INTO service_matters(id, code, name, region_code, region_name, description)
+            VALUES (:id, :code, :name, '230104000000', '哈尔滨市道外区', :description)
+            ON CONFLICT (code) DO NOTHING
+        """), {
+            "id": snapshot["matter_id"], "code": snapshot["code"], "name": snapshot["name"],
+            "description": snapshot["description"],
+        })
+        matter_id = session.execute(text("SELECT id FROM service_matters WHERE code = :code"), {"code": snapshot["code"]}).scalar_one()
+        version = session.execute(text("""
+            SELECT id FROM matter_versions WHERE matter_id = :matter_id AND version_no = 1
+        """), {"matter_id": matter_id}).scalar_one_or_none()
+        if version is None:
+            metadata = {
+                "authority_name": "哈尔滨市道外区社会保障卡经办机构（待核验）",
+                "administrative_level": "县级", "service_scope": "道外区",
+                "applicant_type": "未成年人及其监护人" if "未成年" in snapshot["name"] else "自然人",
+                "item_type": "公共服务", "channels": ["窗口办理（待核验）", "网上办理（待核验）"],
+                "acceptance_condition_raw": snapshot["acceptance"],
+                "source_portal_url": DETAIL_URL, "source_collected_date": "2026-10-12",
+                "configuration_kind": "pending_demo_snapshot", "source_status": "snapshot_pending",
+                "review_scope": "道外区社会保障卡事项的录入与复核",
+                "uncertainties": ["道外区官方事项链接", "办理地点与联系电话", "材料与证件形式", "线上办理与到场要求"],
+            }
+            session.execute(text("""
+                INSERT INTO matter_versions(id, matter_id, version_no, status, change_summary, service_location_id, created_by, metadata_json)
+                VALUES (:id, :matter_id, 1, 'draft', :summary, :location_id, :created_by, CAST(:metadata AS jsonb))
+            """), {
+                "id": snapshot["version_id"], "matter_id": matter_id,
+                "summary": "参照南岗区社会保障卡数据结构录入道外区草稿；全部信息待官方核验。",
+                "location_id": snapshot["location_id"], "created_by": administrator_id,
+                "metadata": json.dumps(metadata, ensure_ascii=False),
+            })
+            version = snapshot["version_id"]
+        for requirement_id, code, type_code, name, format_requirements, sort_order in snapshot["requirements"]:
+            session.execute(text("""
+                INSERT INTO material_requirements(
+                  id, matter_version_id, material_type_id, requirement_code, name,
+                  requirement_level, provider_role, submission_mode, format_requirements, sort_order
+                ) VALUES (:id, :version_id, :material_type_id, :code, :name, 'required', 'applicant', 'user_upload', :format, :sort_order)
+                ON CONFLICT (matter_version_id, requirement_code) DO NOTHING
+            """), {"id": requirement_id, "version_id": version, "material_type_id": material_types[type_code], "code": code,
+                   "name": name, "format": format_requirements, "sort_order": sort_order})
+        requirement_ids = {row["requirement_code"]: row["id"] for row in session.execute(text("""
+            SELECT id, requirement_code FROM material_requirements WHERE matter_version_id = :version_id
+        """), {"version_id": version}).mappings()}
+        for code, requirement_code, method_type, title, steps in snapshot["methods"]:
+            session.execute(text("""
+                INSERT INTO material_acquisition_methods(id, requirement_id, method_code, method_type, title, steps, source_id, verification_status)
+                VALUES (:id, :requirement_id, :code, :method_type, :title, :steps, :source_id, 'pending')
+                ON CONFLICT (requirement_id, method_code) DO NOTHING
+            """), {"id": uuid.uuid4(), "requirement_id": requirement_ids[requirement_code], "code": code,
+                   "method_type": method_type, "title": title, "steps": steps, "source_id": snapshot["source_id"]})
     session.commit()
