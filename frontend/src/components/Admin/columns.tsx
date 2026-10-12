@@ -67,7 +67,7 @@ export const columns: ColumnDef<DataTableFeatures, UserTableData>[] = [
   },
   {
     id: "actions",
-    header: () => <span className="sr-only">操作</span>,
+    header: "操作",
     cell: ({ row }) => (
       <div className="flex justify-end">
         <UserActionsMenu user={row.original} />

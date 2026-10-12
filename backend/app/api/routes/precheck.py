@@ -119,6 +119,32 @@ def list_draft_matter_versions(
     return envelope({"items": versions, "count": len(versions)})
 
 
+@router.get("/admin/matter-versions/finished")
+def list_finished_matter_versions(
+    session: SessionDep, current_user: CurrentUser
+) -> dict:
+    """List administrator-visible matter versions that have completed review."""
+    require_administrator(current_user)
+    versions = rows(session, """
+        SELECT mv.id AS version_id, mv.version_no, mv.status, mv.published_at,
+          mv.source_checked_at, mv.config_revision,
+          sm.id AS matter_id, sm.code, sm.official_code, sm.name,
+          sm.region_code, sm.region_name, sm.description,
+          sl.name AS location_name, sl.address, sl.phone,
+          (SELECT count(*) FROM material_requirements mr
+            WHERE mr.matter_version_id = mv.id) AS material_count,
+          (SELECT count(*) FROM material_acquisition_methods mam
+            JOIN material_requirements mr ON mr.id = mam.requirement_id
+            WHERE mr.matter_version_id = mv.id) AS acquisition_method_count
+        FROM matter_versions mv
+        JOIN service_matters sm ON sm.id = mv.matter_id
+        LEFT JOIN service_locations sl ON sl.id = mv.service_location_id
+        WHERE mv.status = 'finished'
+        ORDER BY mv.published_at DESC NULLS LAST, sm.name
+    """)
+    return envelope({"items": versions, "count": len(versions)})
+
+
 @router.post("/admin/matter-versions/{version_id}/publish")
 def publish_matter_version(
     version_id: uuid.UUID,

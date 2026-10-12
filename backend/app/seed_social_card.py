@@ -18,6 +18,14 @@ MATTER_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb803")
 VERSION_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb804")
 REQUIREMENT_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb805")
 
+MINOR_SOURCE_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb807")
+MINOR_LOCATION_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb808")
+MINOR_MATTER_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb809")
+MINOR_VERSION_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb80a")
+MINOR_IDENTITY_REQUIREMENT_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb80b")
+MINOR_GUARDIAN_REQUIREMENT_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb80c")
+MINOR_RELATIONSHIP_REQUIREMENT_ID = uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb80d")
+
 DETAIL_URL = (
     "https://www.zwfw.hlj.gov.cn/zhcx/bszn?syncItemId=848ba5e1-7f70-4e90-"
     "a35e-f1b4c21b8a3f&areaCode=230103000000"
@@ -208,4 +216,157 @@ def seed_social_card_snapshot(session: Session, administrator_id: uuid.UUID) -> 
             "method_type": method_type, "title": title, "steps": steps, "source_id": SOURCE_ID,
         })
 
+    session.commit()
+
+
+def seed_minor_social_card_snapshot(session: Session, administrator_id: uuid.UUID) -> None:
+    """Create an isolated, pending-verification draft for minor card applications.
+
+    It reuses the supplied Nangang service-location details only as a data-entry
+    starting point.  The child/guardian rules are deliberately marked pending and
+    must not be published before an administrator verifies the official guide.
+    """
+    session.execute(text("""
+        INSERT INTO policy_sources(
+          id, title, source_kind, url, publisher, content_text, verification_status
+        ) VALUES (
+          :id, :title, 'guide', :url, '黑龙江政务服务网', :content, 'pending'
+        ) ON CONFLICT (id) DO NOTHING
+    """), {
+        "id": MINOR_SOURCE_ID,
+        "title": "南岗区未成年社会保障卡申领办事指南（待核验草稿）",
+        "url": DETAIL_URL,
+        "content": """本记录以“南岗区社会保障卡申领”采集快照为录入结构参考。
+未成年人申领是否适用该官方链接、监护人到场要求、身份证明与监护关系证明的具体要求，均未完成官方核验。
+仅用于系统演示和管理员录入、复核流程，不能作为政务办理依据。""",
+    })
+    session.execute(text("""
+        INSERT INTO service_locations(
+          id, name, region_code, address, phone, opening_hours, official_entry_url,
+          source_id, verification_status
+        ) VALUES (
+          :id, :name, '230103000000', :address, :phone, :hours, :url, :source_id, 'pending'
+        ) ON CONFLICT (id) DO NOTHING
+    """), {
+        "id": MINOR_LOCATION_ID,
+        "name": "南岗区政务服务中心综合业务办理窗口（未成年人事项待核验）",
+        "address": "黑龙江省哈尔滨市南岗区中山路181号市民大厦1楼A区综合窗口",
+        "phone": "0451-86224288",
+        "hours": "周一至周五8:00—11:30、13:30—17:00，法定节假日除外",
+        "url": DETAIL_URL,
+        "source_id": MINOR_SOURCE_ID,
+    })
+    session.execute(text("""
+        INSERT INTO service_matters(
+          id, code, official_code, name, region_code, region_name, description
+        ) VALUES (
+          :id, :code, NULL, :name, '230103000000', '哈尔滨市南岗区', :description
+        ) ON CONFLICT (code) DO NOTHING
+    """), {
+        "id": MINOR_MATTER_ID,
+        "code": "nangang_minor_social_security_card_application",
+        "name": "未成年社会保障卡申领",
+        "description": "南岗区未成年社会保障卡申领录入草稿；办理条件、监护关系材料和线上渠道均待官方核验。",
+    })
+    matter_id = session.execute(text("SELECT id FROM service_matters WHERE code = :code"), {
+        "code": "nangang_minor_social_security_card_application"
+    }).scalar_one()
+
+    for type_id, code, name, description in [
+        (uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb80e"), "guardian_identity_card", "监护人身份证", "未成年事项的监护人身份证明；具体要求待官方核验。"),
+        (uuid.UUID("81734622-6a7e-4d12-8e81-8ec23fedb80f"), "guardian_relationship_proof", "监护关系证明", "可用于证明监护关系的材料类别；具体证件范围待官方核验。"),
+    ]:
+        session.execute(text("""
+            INSERT INTO material_types(id, code, name, description)
+            VALUES (:id, :code, :name, :description) ON CONFLICT (code) DO NOTHING
+        """), {"id": type_id, "code": code, "name": name, "description": description})
+    material_types = {
+        row["code"]: row["id"] for row in session.execute(text("""
+            SELECT code, id FROM material_types
+            WHERE code IN ('resident_identity_card', 'guardian_identity_card', 'guardian_relationship_proof')
+        """)).mappings()
+    }
+
+    metadata = {
+        "authority_name": "哈尔滨市南岗区社会保险经办服务中心（待核验）",
+        "administrative_level": "县级",
+        "service_scope": "南岗区",
+        "applicant_type": "未成年人及其监护人",
+        "item_type": "公共服务",
+        "channels": ["窗口办理（待核验）", "网上办理（待核验）"],
+        "acceptance_condition_raw": "未成年人社会保障卡申领的申请人、监护人到场及证件要求待官方核验。",
+        "source_portal_url": DETAIL_URL,
+        "source_collected_date": "2026-10-12",
+        "configuration_kind": "pending_demo_snapshot",
+        "source_status": "snapshot_pending",
+        "review_scope": "未成年人社保卡申领材料与渠道的录入、复核",
+        "uncertainties": [
+            "官方指南是否单列未成年人申领事项",
+            "申请人本人和监护人是否均需到场",
+            "监护关系证明的有效证件范围",
+            "是否支持线上申办或电子证照共享",
+        ],
+    }
+    version = session.execute(text("""
+        SELECT id FROM matter_versions WHERE matter_id = :matter_id AND version_no = 1
+    """), {"matter_id": matter_id}).scalar_one_or_none()
+    if version is None:
+        session.execute(text("""
+            INSERT INTO matter_versions(
+              id, matter_id, version_no, status, change_summary, service_location_id,
+              created_by, metadata_json
+            ) VALUES (
+              :id, :matter_id, 1, 'draft', :summary, :location_id, :created_by,
+              CAST(:metadata AS jsonb)
+            )
+        """), {
+            "id": MINOR_VERSION_ID, "matter_id": matter_id,
+            "summary": "参照南岗区社会保障卡申领快照录入未成年人事项草稿；全部关键信息待官方核验。",
+            "location_id": MINOR_LOCATION_ID, "created_by": administrator_id,
+            "metadata": json.dumps(metadata, ensure_ascii=False),
+        })
+        version = MINOR_VERSION_ID
+
+    requirements = [
+        (MINOR_IDENTITY_REQUIREMENT_ID, "minor_identity_document", "resident_identity_card", "未成年人身份证明", "申请人身份信息或相关身份证明；具体可接受证件待官方核验。", 10),
+        (MINOR_GUARDIAN_REQUIREMENT_ID, "guardian_identity_document", "guardian_identity_card", "监护人身份证", "监护人身份证明；是否必须提供原件及复印件待官方核验。", 20),
+        (MINOR_RELATIONSHIP_REQUIREMENT_ID, "guardian_relationship", "guardian_relationship_proof", "监护关系证明", "出生医学证明、户口簿或其他证明的适用范围待官方核验。", 30),
+    ]
+    for requirement_id, code, type_code, name, format_requirements, sort_order in requirements:
+        session.execute(text("""
+            INSERT INTO material_requirements(
+              id, matter_version_id, material_type_id, requirement_code, name,
+              requirement_level, provider_role, submission_mode, format_requirements, sort_order
+            ) VALUES (
+              :id, :version_id, :material_type_id, :code, :name,
+              'required', 'applicant', 'user_upload', :format_requirements, :sort_order
+            ) ON CONFLICT (matter_version_id, requirement_code) DO NOTHING
+        """), {
+            "id": requirement_id, "version_id": version, "material_type_id": material_types[type_code],
+            "code": code, "name": name, "format_requirements": format_requirements, "sort_order": sort_order,
+        })
+
+    requirement_ids = {
+        row["requirement_code"]: row["id"] for row in session.execute(text("""
+            SELECT id, requirement_code FROM material_requirements WHERE matter_version_id = :version_id
+        """), {"version_id": version}).mappings()
+    }
+    methods = [
+        ("minor_identity_prepare", "minor_identity_document", "self_prepare", "准备未成年人身份证明", "根据官方要求准备申请人身份证明；可接受证件范围待核验。"),
+        ("guardian_identity_prepare", "guardian_identity_document", "self_prepare", "准备监护人身份证", "根据官方要求准备监护人身份证明；原件、复印件要求待核验。"),
+        ("relationship_proof_prepare", "guardian_relationship", "self_prepare", "准备监护关系证明", "准备可证明监护关系的材料；具体材料类型待官方核验。"),
+        ("minor_window_service", "minor_identity_document", "in_person", "前往南岗区政务服务中心窗口咨询办理", "当前仅作为线下咨询与办理地点录入，是否需要预约或本人到场待核验。"),
+    ]
+    for code, requirement_code, method_type, title, steps in methods:
+        session.execute(text("""
+            INSERT INTO material_acquisition_methods(
+              id, requirement_id, method_code, method_type, title, steps, source_id,
+              verification_status
+            ) VALUES (
+              :id, :requirement_id, :code, :method_type, :title, :steps, :source_id, 'pending'
+            ) ON CONFLICT (requirement_id, method_code) DO NOTHING
+        """), {
+            "id": uuid.uuid4(), "requirement_id": requirement_ids[requirement_code], "code": code,
+            "method_type": method_type, "title": title, "steps": steps, "source_id": MINOR_SOURCE_ID,
+        })
     session.commit()

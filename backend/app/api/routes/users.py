@@ -2,6 +2,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, delete, func, select
 
 from app import crud
@@ -226,7 +227,14 @@ def delete_user(
             status_code=403, detail="管理员不能删除自己的账户"
         )
     statement = delete(Item).where(col(Item.owner_id) == user_id)
-    session.exec(statement)
-    session.delete(user)
-    session.commit()
+    try:
+        session.exec(statement)
+        session.delete(user)
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="该用户已被事项审核、事项发布或办件数据引用，不能删除",
+        ) from exc
     return Message(message="用户删除成功")

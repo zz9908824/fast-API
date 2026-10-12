@@ -3,7 +3,7 @@ from sqlmodel import Session, create_engine, select
 from app import crud
 from app.core.config import settings
 from app.models import User, UserCreate
-from app.seed_social_card import seed_social_card_snapshot
+from app.seed_social_card import seed_minor_social_card_snapshot, seed_social_card_snapshot
 
 engine = create_engine(str(settings.DATABASE_URL), pool_pre_ping=True)
 
@@ -35,3 +35,4 @@ def init_db(session: Session) -> None:
     # This imports only a pending-verification draft snapshot from the supplied
     # checklist. It does not publish a government matter or create test cases.
     seed_social_card_snapshot(session, user.id)
+    seed_minor_social_card_snapshot(session, user.id)
