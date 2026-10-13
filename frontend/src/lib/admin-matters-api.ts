@@ -36,3 +36,16 @@ export async function getFinishedMatterVersions(): Promise<FinishedMatterVersion
   }
   return ((await response.json()) as { data: { items: FinishedMatterVersion[] } }).data.items
 }
+
+export async function createDraftFromFinishedVersion(version: FinishedMatterVersion): Promise<{ version_id: string; version_no: number; status: "draft" }> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/admin/matter-versions/${version.version_id}/create-draft`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ expected_config_revision: version.config_revision }),
+  })
+  if (!response.ok) {
+    const body = await response.json().catch(() => null)
+    throw new Error(body?.detail ?? "创建事项草稿失败")
+  }
+  return ((await response.json()) as { data: { version_id: string; version_no: number; status: "draft" } }).data
+}

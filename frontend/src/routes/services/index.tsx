@@ -6,6 +6,9 @@ import { useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Footer } from "@/components/Common/Footer"
+import AppSidebar from "@/components/Sidebar/AppSidebar"
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { searchMatters } from "@/lib/matters-api"
 
 export const Route = createFileRoute("/services/")({ component: Services })
@@ -18,8 +21,11 @@ function Services() {
   })
   const results = data?.items ?? []
 
-  return (
-    <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-8 p-6 md:p-10">
+  return <SidebarProvider>
+    <AppSidebar />
+    <SidebarInset>
+      <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center gap-2 border-b bg-background px-4"><SidebarTrigger className="-ml-1 text-muted-foreground" /></header>
+      <main className="flex-1 p-6 md:p-8"><div className="mx-auto flex max-w-6xl flex-col gap-8">
       <section className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-3">
           <Badge variant="outline">公开事项查询</Badge>
@@ -51,6 +57,8 @@ function Services() {
       {isLoading && <div className="rounded-lg border border-dashed p-12 text-center text-muted-foreground">正在查询事项…</div>}
       {isError && <div className="rounded-lg border border-destructive/40 p-12 text-center text-destructive">事项数据暂时无法加载，请确认后端服务已启动。</div>}
       {!isLoading && !isError && results.length === 0 && <div className="rounded-lg border border-dashed p-12 text-center text-muted-foreground">未找到匹配的已发布事项，请调整关键词或服务区域。</div>}
-    </main>
-  )
+      </div></main>
+      <Footer />
+    </SidebarInset>
+  </SidebarProvider>
 }

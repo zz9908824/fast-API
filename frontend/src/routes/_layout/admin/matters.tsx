@@ -1,18 +1,29 @@
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { FileText, MapPin, RefreshCw, ShieldCheck } from "lucide-react"
+import { FileText, MapPin, Pencil, RefreshCw, ShieldCheck } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { getFinishedMatterVersions } from "@/lib/admin-matters-api"
+import { createDraftFromFinishedVersion, getFinishedMatterVersions, type FinishedMatterVersion } from "@/lib/admin-matters-api"
 
 export const Route = createFileRoute("/_layout/admin/matters")({ component: MatterAdmin })
 
 function MatterAdmin() {
+  const queryClient = useQueryClient()
   const { data: matters = [], isLoading, isError, error, isFetching, refetch } = useQuery({
     queryKey: ["finished-matter-versions"],
     queryFn: getFinishedMatterVersions,
   })
+  const createDraft = useMutation({
+    mutationFn: createDraftFromFinishedVersion,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["finished-matter-versions"] })
+      queryClient.invalidateQueries({ queryKey: ["draft-matter-versions"] })
+    },
+  })
+  const copyToDraft = (matter: FinishedMatterVersion) => {
+    if (window.confirm(`确认基于“${matter.name}”第 ${matter.version_no} 版创建新的草稿版本吗？已发布版本会被保留，草稿中的信息需要重新核验。`)) createDraft.mutate(matter)
+  }
 
   return <div className="space-y-6">
     <header className="flex flex-wrap items-start justify-between gap-3">
@@ -27,6 +38,7 @@ function MatterAdmin() {
       <p className="mt-3 text-sm text-muted-foreground">{matter.description ?? "未填写事项说明"}</p>
       <div className="mt-4 space-y-1 text-sm text-muted-foreground"><p>事项编码：{matter.official_code ?? matter.code}</p><p>办理地点：{matter.location_name ?? "未配置"}</p><p>发布日期：{formatDate(matter.published_at)}</p></div>
       <div className="mt-5 grid grid-cols-3 gap-2 text-center text-xs"><MatterInfo icon={<FileText />} text={`材料要求 ${matter.material_count} 项`} /><MatterInfo icon={<ShieldCheck />} text={`获取方式 ${matter.acquisition_method_count} 项`} /><MatterInfo icon={<MapPin />} text={matter.location_name ? "已配置地点" : "未配置地点"} /></div>
+      <div className="mt-4"><Button size="sm" variant="outline" disabled={createDraft.isPending} onClick={() => copyToDraft(matter)}><Pencil className="mr-1 size-3" />{createDraft.isPending ? "正在创建草稿…" : "编辑（创建草稿版本）"}</Button>{createDraft.error instanceof Error && <p className="mt-2 text-sm text-destructive">{createDraft.error.message}</p>}</div>
     </article>)}</div>}
   </div>
 }

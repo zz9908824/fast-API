@@ -37,6 +37,12 @@ class MatterVersionPublish(SQLModel):
     expected_config_revision: int = Field(gt=0)
 
 
+class MatterVersionDraftCopy(SQLModel):
+    """Expected revision of a finished version that will be copied into a draft."""
+
+    expected_config_revision: int = Field(gt=0)
+
+
 class ReviewSectionUpdate(SQLModel):
     expected_config_revision: int = Field(gt=0)
     note: str = Field(default="", max_length=2000)

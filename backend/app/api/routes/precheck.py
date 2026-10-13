@@ -17,6 +17,7 @@ from sqlalchemy import text
 from app.api.deps import CurrentUser, SessionDep
 from app.schemas.precheck import (
     ApplicationCreate,
+    MatterVersionDraftCopy,
     MatterVersionPublish,
     MatterStatusConfigUpdate,
     MaterialAcquisitionMethodCreate,
@@ -143,6 +144,177 @@ def list_finished_matter_versions(
         ORDER BY mv.published_at DESC NULLS LAST, sm.name
     """)
     return envelope({"items": versions, "count": len(versions)})
+
+
+@router.post("/admin/matter-versions/{version_id}/create-draft", status_code=status.HTTP_201_CREATED)
+def create_draft_from_finished_version(
+    version_id: uuid.UUID, payload: MatterVersionDraftCopy,
+    session: SessionDep, current_user: CurrentUser,
+) -> dict:
+    """Copy a finished configuration into an isolated next draft version.
+
+    Historical applications continue to reference the finished version.  Sources,
+    locations, materials, acquisition methods and rules are duplicated so editing
+    this draft cannot mutate the published configuration.
+    """
+    require_administrator(current_user)
+    source = one(session, "SELECT * FROM matter_versions WHERE id = :id FOR UPDATE", {"id": version_id})
+    if not source:
+        raise HTTPException(status_code=404, detail="事项版本不存在")
+    if source["status"] != "finished":
+        raise HTTPException(status_code=409, detail="仅已发布 finished 版本可以创建新草稿")
+    if source["config_revision"] != payload.expected_config_revision:
+        raise HTTPException(status_code=409, detail="事项配置已更新，请刷新后重新创建草稿")
+
+    source_id_map: dict[uuid.UUID, uuid.UUID] = {}
+    location_id_map: dict[uuid.UUID, uuid.UUID] = {}
+
+    def clone_source(old_id: uuid.UUID | None) -> uuid.UUID | None:
+        if old_id is None:
+            return None
+        if old_id in source_id_map:
+            return source_id_map[old_id]
+        old = one(session, "SELECT * FROM policy_sources WHERE id = :id", {"id": old_id})
+        if not old:
+            return None
+        new_id = uuid.uuid4()
+        session.execute(text("""
+            INSERT INTO policy_sources(
+              id, title, source_kind, url, publisher, published_date, retrieved_at,
+              content_text, content_sha256, verification_status, verified_by, verified_at
+            ) VALUES (
+              :id, :title, :source_kind, :url, :publisher, :published_date, :retrieved_at,
+              :content_text, :content_sha256, 'pending', NULL, NULL
+            )
+        """), {"id": new_id, "title": old["title"], "source_kind": old["source_kind"],
+               "url": old["url"], "publisher": old["publisher"], "published_date": old["published_date"],
+               "retrieved_at": old["retrieved_at"], "content_text": old["content_text"],
+               "content_sha256": old["content_sha256"]})
+        source_id_map[old_id] = new_id
+        return new_id
+
+    def clone_location(old_id: uuid.UUID | None) -> uuid.UUID | None:
+        if old_id is None:
+            return None
+        if old_id in location_id_map:
+            return location_id_map[old_id]
+        old = one(session, "SELECT * FROM service_locations WHERE id = :id", {"id": old_id})
+        if not old:
+            return None
+        new_id = uuid.uuid4()
+        session.execute(text("""
+            INSERT INTO service_locations(
+              id, name, region_code, address, phone, opening_hours, official_entry_url,
+              source_id, verification_status, checked_at
+            ) VALUES (
+              :id, :name, :region_code, :address, :phone, :opening_hours, :official_entry_url,
+              :source_id, 'pending', NULL
+            )
+        """), {"id": new_id, "name": old["name"], "region_code": old["region_code"],
+               "address": old["address"], "phone": old["phone"], "opening_hours": old["opening_hours"],
+               "official_entry_url": old["official_entry_url"], "source_id": clone_source(old["source_id"])})
+        location_id_map[old_id] = new_id
+        return new_id
+
+    try:
+        new_version_id = uuid.uuid4()
+        next_version_no = session.execute(text("""
+            SELECT COALESCE(MAX(version_no), 0) + 1 FROM matter_versions WHERE matter_id = :matter_id
+        """), {"matter_id": source["matter_id"]}).scalar_one()
+        metadata = dict(source["metadata_json"] or {})
+        metadata.pop("review_confirmations", None)
+        metadata.pop("review_notes", None)
+        metadata["derived_from_version_id"] = str(version_id)
+        metadata["draft_copy_reason"] = "基于已发布版本创建新的待复核草稿"
+        new_location_id = clone_location(source["service_location_id"])
+        session.execute(text("""
+            INSERT INTO matter_versions(
+              id, matter_id, version_no, status, valid_from, valid_to, change_summary,
+              service_location_id, created_by, metadata_json, config_revision
+            ) VALUES (
+              :id, :matter_id, :version_no, 'draft', NULL, NULL, :summary,
+              :location_id, :created_by, CAST(:metadata AS jsonb), 1
+            )
+        """), {"id": new_version_id, "matter_id": source["matter_id"], "version_no": next_version_no,
+               "summary": f"基于已发布第 {source['version_no']} 版创建草稿，待重新核验。",
+               "location_id": new_location_id, "created_by": current_user.id,
+               "metadata": json.dumps(metadata, ensure_ascii=False)})
+
+        requirement_id_map: dict[uuid.UUID, uuid.UUID] = {}
+        requirements = rows(session, "SELECT * FROM material_requirements WHERE matter_version_id = :version_id", {"version_id": version_id})
+        for requirement in requirements:
+            new_requirement_id = uuid.uuid4()
+            session.execute(text("""
+                INSERT INTO material_requirements(
+                  id, matter_version_id, material_type_id, requirement_code, name,
+                  applicability_expr, requirement_level, provider_role, submission_mode,
+                  original_required, copy_count, min_pages, format_requirements,
+                  template_source_id, field_schema, sort_order, verification_status,
+                  verified_by, verified_at, alternative_group_code
+                ) VALUES (
+                  :id, :version_id, :material_type_id, :requirement_code, :name,
+                  CAST(:applicability_expr AS jsonb), :requirement_level, :provider_role, :submission_mode,
+                  :original_required, :copy_count, :min_pages, :format_requirements,
+                  :template_source_id, CAST(:field_schema AS jsonb), :sort_order, 'pending',
+                  NULL, NULL, :alternative_group_code
+                )
+            """), {"id": new_requirement_id, "version_id": new_version_id,
+                   "material_type_id": requirement["material_type_id"], "requirement_code": requirement["requirement_code"],
+                   "name": requirement["name"], "applicability_expr": json.dumps(requirement["applicability_expr"]),
+                   "requirement_level": requirement["requirement_level"], "provider_role": requirement["provider_role"],
+                   "submission_mode": requirement["submission_mode"], "original_required": requirement["original_required"],
+                   "copy_count": requirement["copy_count"], "min_pages": requirement["min_pages"],
+                   "format_requirements": requirement["format_requirements"],
+                   "template_source_id": clone_source(requirement["template_source_id"]),
+                   "field_schema": json.dumps(requirement["field_schema"]), "sort_order": requirement["sort_order"],
+                   "alternative_group_code": requirement.get("alternative_group_code")})
+            requirement_id_map[requirement["id"]] = new_requirement_id
+
+        methods = rows(session, """
+            SELECT mam.* FROM material_acquisition_methods mam
+            JOIN material_requirements mr ON mr.id = mam.requirement_id
+            WHERE mr.matter_version_id = :version_id
+        """, {"version_id": version_id})
+        for method in methods:
+            session.execute(text("""
+                INSERT INTO material_acquisition_methods(
+                  id, requirement_id, method_code, method_type, title, steps, entry_url,
+                  location_id, source_id, applicability_expr, verification_status, sort_order
+                ) VALUES (
+                  :id, :requirement_id, :method_code, :method_type, :title, :steps, :entry_url,
+                  :location_id, :source_id, CAST(:applicability_expr AS jsonb), 'pending', :sort_order
+                )
+            """), {"id": uuid.uuid4(), "requirement_id": requirement_id_map[method["requirement_id"]],
+                   "method_code": method["method_code"], "method_type": method["method_type"],
+                   "title": method["title"], "steps": method["steps"], "entry_url": method["entry_url"],
+                   "location_id": clone_location(method["location_id"]), "source_id": clone_source(method["source_id"]),
+                   "applicability_expr": json.dumps(method["applicability_expr"]), "sort_order": method["sort_order"]})
+
+        rules = rows(session, "SELECT * FROM verification_rules WHERE matter_version_id = :version_id", {"version_id": version_id})
+        for rule in rules:
+            session.execute(text("""
+                INSERT INTO verification_rules(
+                  id, matter_version_id, rule_code, name, rule_type, applicability_expr,
+                  input_spec, operator_code, parameters, on_missing, severity,
+                  message_template, remedy_template, primary_source_id, source_excerpt, sort_order
+                ) VALUES (
+                  :id, :version_id, :rule_code, :name, :rule_type, CAST(:applicability_expr AS jsonb),
+                  CAST(:input_spec AS jsonb), :operator_code, CAST(:parameters AS jsonb), :on_missing, :severity,
+                  :message_template, :remedy_template, :primary_source_id, :source_excerpt, :sort_order
+                )
+            """), {"id": uuid.uuid4(), "version_id": new_version_id, "rule_code": rule["rule_code"],
+                   "name": rule["name"], "rule_type": rule["rule_type"],
+                   "applicability_expr": json.dumps(rule["applicability_expr"]), "input_spec": json.dumps(rule["input_spec"]),
+                   "operator_code": rule["operator_code"], "parameters": json.dumps(rule["parameters"]),
+                   "on_missing": rule["on_missing"], "severity": rule["severity"],
+                   "message_template": rule["message_template"], "remedy_template": rule["remedy_template"],
+                   "primary_source_id": clone_source(rule["primary_source_id"]), "source_excerpt": rule["source_excerpt"],
+                   "sort_order": rule["sort_order"]})
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    return envelope({"version_id": new_version_id, "matter_id": source["matter_id"], "version_no": next_version_no, "status": "draft"})
 
 
 @router.post("/admin/matter-versions/{version_id}/publish")
