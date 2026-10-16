@@ -5,6 +5,10 @@ export type DraftMatterVersion = {
   config_revision: number
   change_summary: string | null
   metadata_json: Record<string, unknown>
+  government_profile_json: Record<string, string>
+  processing_steps_json: Array<{ step: string | null; time_limit: string | null; result: string | null; review_standard: string | null }>
+  legal_bases_json: string[]
+  field_evidence_json: Array<{ field_path: string; page_number: number | null; quote: string }>
   matter_id: string
   matter_code: string
   official_code: string | null
@@ -45,6 +49,27 @@ export type DraftMatterVersion = {
     entry_url: string | null
     verification_status: string
   }>
+  delegation_policy: {
+    id: string
+    delegation_allowed: boolean
+    applicant_must_attend: boolean
+    relationship_required: boolean
+    allowed_relationships: string[]
+    condition_expr: Record<string, unknown>
+    questionnaire_required: boolean
+    verification_status: string
+    source_id: string | null
+    materials: Array<{
+      id: string
+      material_code: string
+      name: string
+      requirement_level: "required" | "optional"
+      submission_mode: "user_upload" | "department_fetch" | "on_site" | "no_submission"
+      applicability_expr: Record<string, unknown>
+      sort_order: number
+      verification_status: string
+    }>
+  } | null
 }
 
 const apiBaseUrl = import.meta.env.VITE_API_URL ?? ""
@@ -56,8 +81,10 @@ function authHeaders(): Record<string, string> {
   return headers
 }
 
-export async function getDraftMatterVersions(): Promise<DraftMatterVersion[]> {
-  const response = await fetch(`${apiBaseUrl}/api/v1/admin/matter-versions/drafts`, {
+export async function getDraftMatterVersions(keyword = ""): Promise<DraftMatterVersion[]> {
+  const search = new URLSearchParams()
+  if (keyword.trim()) search.set("q", keyword.trim())
+  const response = await fetch(`${apiBaseUrl}/api/v1/admin/matter-versions/drafts?${search.toString()}`, {
     headers: authHeaders(),
   })
   if (!response.ok) throw new Error("待审核事项加载失败")
@@ -74,6 +101,43 @@ export async function publishMatterVersion(version: DraftMatterVersion): Promise
     const body = await response.json().catch(() => null)
     throw new Error(body?.detail ?? "发布事项失败")
   }
+}
+
+export async function updateDraftMatterName(version: DraftMatterVersion, name: string): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/admin/matter-versions/${version.version_id}/matter-name`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ expected_config_revision: version.config_revision, name }),
+  })
+  if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail ?? "修改事项名称失败")
+}
+
+export async function deleteDraftMatterVersion(version: DraftMatterVersion): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/admin/matter-versions/${version.version_id}`, {
+    method: "DELETE", headers: authHeaders(),
+  })
+  if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail ?? "删除事项失败")
+}
+
+export async function updateGovernmentDetails(version: DraftMatterVersion, data: {
+  government_profile: Record<string, string>
+  processing_steps: Array<Record<string, unknown>>
+  legal_bases: string[]
+  field_evidence: Array<Record<string, unknown>>
+}): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/admin/matter-versions/${version.version_id}/government-details`, {
+    method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ expected_config_revision: version.config_revision, ...data }),
+  })
+  if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail ?? "保存政务基础信息失败")
+}
+
+export async function confirmGovernmentDetails(version: DraftMatterVersion): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/admin/matter-versions/${version.version_id}/government-details/confirm`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ expected_config_revision: version.config_revision }),
+  })
+  if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail ?? "确认政务基础信息失败")
 }
 
 export async function saveReviewNote(version: DraftMatterVersion, section: string, note: string): Promise<void> {
@@ -144,6 +208,39 @@ export async function updateMaterialRequirement(version: DraftMatterVersion, req
 export async function deleteMaterialRequirement(version: DraftMatterVersion, requirementId: string): Promise<void> {
   const response = await fetch(`${apiBaseUrl}/api/v1/admin/matter-versions/${version.version_id}/material-requirements/${requirementId}?expected_config_revision=${version.config_revision}`, { method: "DELETE", headers: authHeaders() })
   if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail ?? "删除材料要求失败")
+}
+
+export type DelegationPolicyPayload = {
+  delegation_allowed: boolean
+  applicant_must_attend: boolean
+  relationship_required: boolean
+  allowed_relationships: string[]
+  condition_expr: Record<string, unknown>
+  questionnaire_required: boolean
+  source_id: string | null
+  materials: Array<{
+    material_code: string
+    name: string
+    requirement_level: "required" | "optional"
+    submission_mode: "user_upload" | "department_fetch" | "on_site" | "no_submission"
+    applicability_expr: Record<string, unknown>
+  }>
+}
+
+export async function updateDelegationPolicy(version: DraftMatterVersion, data: DelegationPolicyPayload): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/admin/matter-versions/${version.version_id}/delegation-policy`, {
+    method: "PUT", headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ expected_config_revision: version.config_revision, ...data }),
+  })
+  if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail ?? "保存代办规则失败")
+}
+
+export async function confirmDelegationPolicy(version: DraftMatterVersion): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/admin/matter-versions/${version.version_id}/delegation-policy/confirm`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ expected_config_revision: version.config_revision }),
+  })
+  if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail ?? "确认代办规则失败")
 }
 
 type AcquisitionMethodPayload = {

@@ -7,7 +7,7 @@ import useAuth from "@/hooks/useAuth"
 export const Route = createFileRoute("/_layout/")({
   component: Dashboard,
   head: () => ({
-    meta: [{ title: "控制台 - 政务材料预审系统" }],
+    meta: [{ title: "首页 - 政务材料预审系统" }],
   }),
 })
 
@@ -26,6 +26,11 @@ const governmentLinks = [
     name: "黑龙江省人民政府",
     description: "访问黑龙江省人民政府官方网站，查看政策和政务公开信息。",
     href: "https://www.hlj.gov.cn/",
+  },
+  {
+    name: "哈尔滨松北新区人民政府 AI 政务问答北北",
+    description: "进入松北新区人民政府 AI 政务问答服务，获取办事咨询帮助。",
+    href: "https://www.songbei.gov.cn/aiqa/#/",
   },
 ]
 

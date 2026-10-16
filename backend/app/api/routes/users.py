@@ -13,6 +13,7 @@ from app.api.deps import (
 )
 from app.core.config import settings
 from app.core.security import get_password_hash, verify_password
+from app.services.operation_audit import write_operation_audit
 from app.models import (
     Item,
     Message,
@@ -55,7 +56,7 @@ def read_users(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
 @router.post(
     "/", dependencies=[Depends(get_current_active_superuser)], response_model=UserPublic
 )
-def create_user(*, session: SessionDep, user_in: UserCreate) -> Any:
+def create_user(*, session: SessionDep, user_in: UserCreate, current_user: CurrentUser) -> Any:
     """
     Create new user.
     """
@@ -67,6 +68,11 @@ def create_user(*, session: SessionDep, user_in: UserCreate) -> Any:
         )
 
     user = crud.create_user(session=session, user_create=user_in)
+    write_operation_audit(
+        session, current_user.id, "user_management", "新增用户", "user", user.id,
+        user.full_name or user.email,
+    )
+    session.commit()
     if settings.emails_enabled and user_in.email:
         email_data = generate_new_account_email(
             email_to=user_in.email, username=user_in.email, password=user_in.password
@@ -190,6 +196,7 @@ def update_user(
     session: SessionDep,
     user_id: uuid.UUID,
     user_in: UserUpdate,
+    current_user: CurrentUser,
 ) -> Any:
     """
     Update a user.
@@ -209,6 +216,11 @@ def update_user(
             )
 
     db_user = crud.update_user(session=session, db_user=db_user, user_in=user_in)
+    write_operation_audit(
+        session, current_user.id, "user_management", "编辑用户", "user", db_user.id,
+        db_user.full_name or db_user.email,
+    )
+    session.commit()
     return db_user
 
 
@@ -229,7 +241,11 @@ def delete_user(
     statement = delete(Item).where(col(Item.owner_id) == user_id)
     try:
         session.exec(statement)
+        user_name = user.full_name or user.email
         session.delete(user)
+        write_operation_audit(
+            session, current_user.id, "user_management", "删除用户", "user", user_id, user_name,
+        )
         session.commit()
     except IntegrityError as exc:
         session.rollback()

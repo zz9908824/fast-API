@@ -29,6 +29,17 @@ class Settings(BaseSettings):
     PROJECT_NAME: str
     SENTRY_DSN: HttpUrl | None = None
     DATABASE_URL: PostgresDsn
+    OLLAMA_BASE_URL: str = "http://host.docker.internal:11434"
+    OLLAMA_MODEL: str = "qwen3.5:4b"
+    OLLAMA_TIMEOUT_SECONDS: int = 180
+    DASHSCOPE_API_KEY: str | None = None
+    DASHSCOPE_BASE_URL: str = "https://ws-fydt3ux4eikccv6j.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+    DASHSCOPE_MODEL: str = "qwen3.8-max"
+    DASHSCOPE_TIMEOUT_SECONDS: int = 180
+    OCR_SERVICE_URL: str = "http://ocr-worker:8001"
+    OCR_TIMEOUT_SECONDS: int = 300
+    IMPORT_STORAGE_PATH: str = "/data/imports"
+    APPLICATION_DOCUMENT_STORAGE_PATH: str = "/data/application-documents"
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod

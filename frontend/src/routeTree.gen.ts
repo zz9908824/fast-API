@@ -18,6 +18,8 @@ import { Route as LayoutIndexRouteImport } from './routes/_layout/index'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 import { Route as LayoutItemsRouteImport } from './routes/_layout/items'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
+import { Route as LayoutStaffTasksRouteImport } from './routes/_layout/staff/tasks'
+import { Route as LayoutStaffTasksTaskIdRouteImport } from './routes/_layout/staff/tasks/$taskId'
 
 const LayoutRoute = LayoutRouteImport.update({
   id: '/_layout',
@@ -63,6 +65,16 @@ const LayoutSettingsRoute = LayoutSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutStaffTasksRoute = LayoutStaffTasksRouteImport.update({
+  id: '/staff/tasks',
+  path: '/staff/tasks',
+  getParentRoute: () => LayoutRoute,
+} as any)
+const LayoutStaffTasksTaskIdRoute = LayoutStaffTasksTaskIdRouteImport.update({
+  id: '/$taskId',
+  path: '/$taskId',
+  getParentRoute: () => LayoutStaffTasksRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof LayoutIndexRoute
@@ -73,6 +85,8 @@ export interface FileRoutesByFullPath {
   '/admin': typeof LayoutAdminRoute
   '/items': typeof LayoutItemsRoute
   '/settings': typeof LayoutSettingsRoute
+  '/staff/tasks': typeof LayoutStaffTasksRoute
+  '/staff/tasks/$taskId': typeof LayoutStaffTasksTaskIdRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -82,6 +96,8 @@ export interface FileRoutesByTo {
   '/admin': typeof LayoutAdminRoute
   '/items': typeof LayoutItemsRoute
   '/settings': typeof LayoutSettingsRoute
+  '/staff/tasks': typeof LayoutStaffTasksRoute
+  '/staff/tasks/$taskId': typeof LayoutStaffTasksTaskIdRoute
   '/': typeof LayoutIndexRoute
 }
 export interface FileRoutesById {
@@ -94,6 +110,8 @@ export interface FileRoutesById {
   '/_layout/admin': typeof LayoutAdminRoute
   '/_layout/items': typeof LayoutItemsRoute
   '/_layout/settings': typeof LayoutSettingsRoute
+  '/_layout/staff/tasks': typeof LayoutStaffTasksRouteWithChildren
+  '/_layout/staff/tasks/$taskId': typeof LayoutStaffTasksTaskIdRoute
   '/_layout/': typeof LayoutIndexRoute
 }
 export interface FileRouteTypes {
@@ -107,6 +125,8 @@ export interface FileRouteTypes {
     | '/admin'
     | '/items'
     | '/settings'
+    | '/staff/tasks'
+    | '/staff/tasks/$taskId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
@@ -116,6 +136,8 @@ export interface FileRouteTypes {
     | '/admin'
     | '/items'
     | '/settings'
+    | '/staff/tasks'
+    | '/staff/tasks/$taskId'
     | '/'
   id:
     | '__root__'
@@ -127,6 +149,8 @@ export interface FileRouteTypes {
     | '/_layout/admin'
     | '/_layout/items'
     | '/_layout/settings'
+    | '/_layout/staff/tasks'
+    | '/_layout/staff/tasks/$taskId'
     | '/_layout/'
   fileRoutesById: FileRoutesById
 }
@@ -203,6 +227,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutSettingsRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/staff/tasks': {
+      id: '/_layout/staff/tasks'
+      path: '/staff/tasks'
+      fullPath: '/staff/tasks'
+      preLoaderRoute: typeof LayoutStaffTasksRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/staff/tasks/$taskId': {
+      id: '/_layout/staff/tasks/$taskId'
+      path: '/$taskId'
+      fullPath: '/staff/tasks/$taskId'
+      preLoaderRoute: typeof LayoutStaffTasksTaskIdRouteImport
+      parentRoute: typeof LayoutStaffTasksRoute
+    }
   }
 }
 
@@ -211,13 +249,26 @@ interface LayoutRouteChildren {
   LayoutItemsRoute: typeof LayoutItemsRoute
   LayoutSettingsRoute: typeof LayoutSettingsRoute
   LayoutIndexRoute: typeof LayoutIndexRoute
+  LayoutStaffTasksRoute: typeof LayoutStaffTasksRouteWithChildren
 }
+
+interface LayoutStaffTasksRouteChildren {
+  LayoutStaffTasksTaskIdRoute: typeof LayoutStaffTasksTaskIdRoute
+}
+
+const LayoutStaffTasksRouteChildren: LayoutStaffTasksRouteChildren = {
+  LayoutStaffTasksTaskIdRoute: LayoutStaffTasksTaskIdRoute,
+}
+
+const LayoutStaffTasksRouteWithChildren =
+  LayoutStaffTasksRoute._addFileChildren(LayoutStaffTasksRouteChildren)
 
 const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAdminRoute: LayoutAdminRoute,
   LayoutItemsRoute: LayoutItemsRoute,
   LayoutSettingsRoute: LayoutSettingsRoute,
   LayoutIndexRoute: LayoutIndexRoute,
+  LayoutStaffTasksRoute: LayoutStaffTasksRouteWithChildren,
 }
 
 const LayoutRouteWithChildren =

@@ -8,6 +8,7 @@ const styles: Record<string, "default" | "secondary" | "destructive" | "outline"
   "字段冲突": "destructive",
   "待领取": "secondary",
   "处理中": "outline",
+  "用户已取消": "destructive",
   "待准备": "secondary",
   "现场出示": "outline",
 }

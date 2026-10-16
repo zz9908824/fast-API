@@ -1,15 +1,17 @@
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { Link, createFileRoute, notFound, useNavigate } from "@tanstack/react-router"
 import { Building2, ChevronDown, FileText, MapPin, ShieldCheck } from "lucide-react"
+import { useState } from "react"
 
 import { Footer } from "@/components/Common/Footer"
 import AppSidebar from "@/components/Sidebar/AppSidebar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { isLoggedIn } from "@/hooks/useAuth"
 import useCustomToast from "@/hooks/useCustomToast"
-import { createApplication } from "@/lib/applications-api"
+import { createApplication, getOpenApplications } from "@/lib/applications-api"
 import { getMatter } from "@/lib/matters-api"
 
 export const Route = createFileRoute("/services/$matterId")({
@@ -24,11 +26,18 @@ export const Route = createFileRoute("/services/$matterId")({
 function MatterDetail() {
   const matter = Route.useLoaderData()
   const navigate = useNavigate()
+  const [startOpen, setStartOpen] = useState(false)
   const { showErrorToast, showSuccessToast } = useCustomToast()
+  const openApplicationsQuery = useQuery({
+    queryKey: ["open-applications", matter.id],
+    queryFn: () => getOpenApplications(matter.id),
+    enabled: startOpen && isLoggedIn(),
+  })
   const createApplicationMutation = useMutation({
-    mutationFn: () => createApplication({ matterId: matter.id, matterVersionId: matter.version_id }),
+    mutationFn: (createNew: boolean) => createApplication({ matterId: matter.id, matterVersionId: matter.version_id, createNew }),
     onSuccess: (application) => {
-      showSuccessToast("已创建办件，可以开始填写材料信息")
+      showSuccessToast("已创建材料准备记录，可以保存进度并继续准备")
+      setStartOpen(false)
       navigate({ to: "/applications/$applicationId", params: { applicationId: application.id } })
     },
     onError: (error: Error) => showErrorToast(error.message),
@@ -104,21 +113,35 @@ function MatterDetail() {
             </section>
 
             <section className="rounded-xl border bg-card p-5">
-              <h2 className="text-lg font-semibold">准备好材料后，立即办件</h2>
-              <p className="mt-2 text-sm text-muted-foreground">创建办件后可保存材料准备进度、上传材料并申请工作人员复核。</p>
+              <h2 className="text-lg font-semibold">开始准备材料</h2>
+              <p className="mt-2 text-sm text-muted-foreground">建立材料准备记录后，可保存准备进度、上传材料并查看检查反馈。本系统不进行正式受理或审批，最终仍需按指引到线下办理。</p>
               <div className="mt-4">
                 {isLoggedIn() ? (
-                  <Button size="lg" onClick={() => createApplicationMutation.mutate()} disabled={createApplicationMutation.isPending}>
-                    {createApplicationMutation.isPending ? "正在创建办件…" : "立即办件"}
+                  <Button size="lg" onClick={() => setStartOpen(true)}>
+                    开始准备材料
                   </Button>
                 ) : (
-                  <Button asChild size="lg"><Link to="/login">登录后立即办件</Link></Button>
+                  <Button size="lg" onClick={() => { sessionStorage.setItem("post_login_return", `/services/${matter.id}`); navigate({ to: "/login" }) }}>登录后开始准备</Button>
                 )}
               </div>
             </section>
           </div>
         </main>
         <Footer />
+        <Dialog open={startOpen} onOpenChange={setStartOpen}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader><DialogTitle>开始准备材料</DialogTitle><DialogDescription>本次将建立一份材料准备记录，方便保存进度、检查材料和查看反馈。</DialogDescription></DialogHeader>
+            <div className="space-y-2 rounded-lg bg-muted/50 p-4 text-sm"><p><span className="text-muted-foreground">办理事项：</span>{matter.name}</p><p><span className="text-muted-foreground">适用地区：</span>{matter.region_name}</p></div>
+            {openApplicationsQuery.isLoading && <p className="text-sm text-muted-foreground">正在检查已有准备记录…</p>}
+            {(openApplicationsQuery.data?.items.length ?? 0) > 0 && <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm dark:bg-amber-950/20"><p className="font-medium">该事项已有未结束的材料准备记录</p><p className="mt-1 text-muted-foreground">建议继续原记录，避免材料进度分散；也可以确认后新建一份。</p></div>}
+            <DialogFooter className="gap-2 sm:gap-2">
+              {(openApplicationsQuery.data?.items.length ?? 0) > 0 && <Button variant="outline" onClick={() => navigate({ to: "/applications/$applicationId", params: { applicationId: openApplicationsQuery.data!.items[0].id } })}>继续准备</Button>}
+              <Button onClick={() => createApplicationMutation.mutate((openApplicationsQuery.data?.items.length ?? 0) > 0)} disabled={openApplicationsQuery.isLoading || createApplicationMutation.isPending}>
+                {createApplicationMutation.isPending ? "正在创建…" : (openApplicationsQuery.data?.items.length ?? 0) > 0 ? "新建一份" : "开始准备"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </SidebarInset>
     </SidebarProvider>
   )

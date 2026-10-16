@@ -63,6 +63,21 @@ services:
       EMAILS_FROM_EMAIL: ${EMAILS_FROM_EMAIL}
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?Variable not set}@db:5432/app
       SENTRY_DSN: ${SENTRY_DSN:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:4b}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-180}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://ws-fydt3ux4eikccv6j.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}
+      DASHSCOPE_MODEL: ${DASHSCOPE_MODEL:-qwen3.8-max}
+      DASHSCOPE_TIMEOUT_SECONDS: ${DASHSCOPE_TIMEOUT_SECONDS:-180}
+      OCR_SERVICE_URL: ${OCR_SERVICE_URL:-http://ocr-worker:8001}
+      OCR_TIMEOUT_SECONDS: ${OCR_TIMEOUT_SECONDS:-300}
+      IMPORT_STORAGE_PATH: /data/imports
+      APPLICATION_DOCUMENT_STORAGE_PATH: /data/application-documents
+      FRONTEND_HOST: ${FRONTEND_HOST:-http://localhost:8000}
+    volumes:
+      - matter-import-storage:/data/imports
+      - application-document-storage:/data/application-documents
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/utils/health-check/"]
@@ -84,5 +99,31 @@ services:
       - traefik.http.routers.backend-http.rule=Host(`${DOMAIN:-localhost}`)
       - traefik.http.routers.backend-http.entrypoints=http
 
+  ocr-worker:
+    build:
+      context: ./ocr_worker
+    environment:
+      OCR_DET_MODEL_DIR: /models/PP-OCRv5_server_det
+      OCR_REC_MODEL_DIR: /models/PP-OCRv5_server_rec
+      OCR_STORAGE_ROOT: /data/imports
+      OCR_APPLICATION_STORAGE_ROOT: /data/application-documents
+      # PP-OCR server models run locally on CPU.  Explicit thread settings avoid
+      # falling back to a single CPU core during lengthy scanned-PDF imports.
+      OCR_CPU_THREADS: "8"
+      OMP_NUM_THREADS: "8"
+      OPENBLAS_NUM_THREADS: "8"
+    volumes:
+      - matter-import-storage:/data/imports
+      - application-document-storage:/data/application-documents
+      - D:/models/PP-OCRv5_server_det:/models/PP-OCRv5_server_det:ro
+      - D:/models/PP-OCRv5_server_rec:/models/PP-OCRv5_server_rec:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
 volumes:
   app-db-data:
+  matter-import-storage:
+  application-document-storage:

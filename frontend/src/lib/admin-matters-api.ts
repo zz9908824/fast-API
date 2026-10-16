@@ -9,6 +9,7 @@ export type FinishedMatterVersion = {
   code: string
   official_code: string | null
   name: string
+  is_active: boolean
   region_code: string
   region_name: string
   description: string | null
@@ -26,8 +27,10 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-export async function getFinishedMatterVersions(): Promise<FinishedMatterVersion[]> {
-  const response = await fetch(`${apiBaseUrl}/api/v1/admin/matter-versions/finished`, {
+export async function getFinishedMatterVersions(keyword = ""): Promise<FinishedMatterVersion[]> {
+  const search = new URLSearchParams()
+  if (keyword.trim()) search.set("q", keyword.trim())
+  const response = await fetch(`${apiBaseUrl}/api/v1/admin/matter-versions/finished?${search.toString()}`, {
     headers: authHeaders(),
   })
   if (!response.ok) {
@@ -48,4 +51,16 @@ export async function createDraftFromFinishedVersion(version: FinishedMatterVers
     throw new Error(body?.detail ?? "创建事项草稿失败")
   }
   return ((await response.json()) as { data: { version_id: string; version_no: number; status: "draft" } }).data
+}
+
+export async function disableMatter(version: FinishedMatterVersion): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/admin/matter-versions/${version.version_id}/disable`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ expected_config_revision: version.config_revision }),
+  })
+  if (!response.ok) {
+    const body = await response.json().catch(() => null)
+    throw new Error(body?.detail ?? "禁用事项失败")
+  }
 }

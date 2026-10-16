@@ -1,88 +1,80 @@
-# Full Stack FastAPI Template
+# 政务预审 哈哈快办
+## 致力于用技术解决群众办事中的实际问题。
+政务材料预审项目，探索将文字识别、大模型信息抽取与规则核验相结合，提供事项材料查询、个性化清单、材料预审及人工复核支持。项目以减少群众反复补交材料、降低工作人员重复核对负担为目标，推动线上材料准备与线下业务办理衔接，让办事准备更清楚、更方便。
 
-[![Test Docker Compose](../../actions/workflows/test-docker-compose.yml/badge.svg)](../../actions/workflows/test-docker-compose.yml)
-[![Test Backend](../../actions/workflows/test-backend.yml/badge.svg)](../../actions/workflows/test-backend.yml)
+# 项目主要功能框架
+哈哈快办
+├─ 居民端
+│  ├─ 事项查询
+│  │  ├─ 按关键词/区域搜索公开事项
+│  │  ├─ 查看办理指南、地点、电话、材料与获取方式
+│  │  └─ 查看事项详情并开始准备材料
+│  ├─ 我的办件
+│  │  ├─ 创建、继续、取消材料准备记录
+│  │  ├─ 自定义当前办件的显示事项名称
+│  │  ├─ 填写申请人、代办人和办理情形问卷
+│  │  ├─ 按材料逐项上传、预览、重传
+│  │  ├─ 本地/云端模型逐项核查
+│  │  ├─ 查看模型结果、工作人员反馈
+│  │  └─ 生成线下办理准备包
+│  └─ 账户
+│     ├─ 注册、登录、找回/重置密码
+│     └─ 个人信息与密码维护
+│
+├─ 工作人员端：办件复核
+│  ├─ 按事项聚合待复核办件
+│  ├─ 领取具体用户办件
+│  ├─ 查看用户上传原文件与模型结论
+│  ├─ 对每项材料选择：通过 / 要求重传
+│  ├─ 填写备注并提交复核结果
+│  └─ 用户取消办件后标记、清理复核任务
+│
+├─ 管理员端
+│  ├─ 用户管理：新增、编辑、删除用户
+│  ├─ 事项配置
+│  │  ├─ 查询已发布事项
+│  │  ├─ 禁用事项
+│  │  └─ 从已发布事项复制新 draft 草稿版本
+│  ├─ 事项状态复核
+│  │  ├─ 审核事项名称、状态、来源、地点、材料、获取方式
+│  │  ├─ 审核政务基础信息、流程、依据、证据
+│  │  ├─ 审核是否允许代办及代办材料
+│  │  └─ 所有必要字段 verified 后发布事项
+│  ├─ 智能导入事项
+│  │  ├─ 上传 PDF、Word、图片、TXT
+│  │  ├─ OCR/文本解析
+│  │  ├─ 本地 Ollama 或云端大模型字段抽取
+│  │  └─ 生成待人工核验的 draft 事项
+│  └─ 记录管理
+│     ├─ 管理员的事项审核、办件复核、用户管理操作记录
+│     └─ 普通用户的办件操作记录
+│
+├─ 智能服务
+│  ├─ OCR Worker
+│  │  ├─ PDF/图片：PP-OCRv5
+│  │  ├─ Word：文档文字提取
+│  │  └─ TXT：直接读取
+│  ├─ 本地模型
+│  │  └─ OCR文字 → Ollama qwen3.5:4b → JSON字段/材料核查结果
+│  └─ 云端模型
+│     └─ 文件或图片 → 云端 Qwen → JSON字段/材料核查结果
+│
+└─ 线下办理准备包
+   ├─ 仅在全部材料核查通过后生成
+   ├─ 受登录保护的结果页与二维码
+   ├─ 办前准备单 PDF
+   ├─ 当前有效原文件 ZIP
+   └─ 资料更新后旧准备包标记为过期，需重新生成
 
-## Technology Stack and Features
-
-- ⚡ [**FastAPI**](https://fastapi.tiangolo.com) for the Python backend API.
-  - 🧰 [SQLModel](https://sqlmodel.tiangolo.com) for the Python SQL database interactions (ORM).
-  - 🔍 [Pydantic](https://docs.pydantic.dev), used by FastAPI, for the data validation and settings management.
-  - 💾 [PostgreSQL](https://www.postgresql.org) as the SQL database.
-- 🚀 [React](https://react.dev) for the frontend.
-  - 🧩 Built into the backend application and served by FastAPI on the same domain as the API.
-  - 💃 Using TypeScript, hooks, [Vite](https://vitejs.dev), and other parts of a modern frontend stack.
-  - 🎨 [Tailwind CSS](https://tailwindcss.com) and [shadcn/ui](https://ui.shadcn.com) for the frontend components.
-  - 🤖 An automatically generated frontend client.
-  - 🧪 [Playwright](https://playwright.dev) for end-to-end testing.
-  - 🦇 Dark mode support.
-- ☁️ [FastAPI Cloud](https://fastapicloud.com) for deployment.
-- 🐋 [Docker Compose](https://www.docker.com) for local services and self-hosted deployment.
-  - 📞 [Traefik](https://traefik.io) as a reverse proxy with automatic HTTPS.
-- 🔒 Secure password hashing by default.
-- 🔑 JWT (JSON Web Token) authentication.
-- 📫 Email-based password recovery.
-- ✉️ [React Email](https://react.email) for email templates.
-- 📬 [Mailpit](https://mailpit.axllent.org) for local email testing during development.
-- ✅ Tests with [Pytest](https://pytest.org).
-- 🏭 CI (continuous integration) and CD (continuous deployment) based on GitHub Actions.
-
-### Dashboard Login
-
-![Dashboard login screenshot](img/login.png)
-
-### Dashboard - Admin
-
-![Admin dashboard screenshot](img/dashboard.png)
-
-### Dashboard - Items
-
-![Items dashboard screenshot](img/dashboard-items.png)
-
-### Dashboard - Dark Mode
-
-![Dark mode dashboard screenshot](img/dashboard-dark.png)
-
-### React Email Templates
-
-![Email templates screenshot](img/react-email.png)
-
-### Mailpit - Local Email Testing
-
-![Mailpit screenshot](img/mailpit.png)
-
-### Interactive API Documentation
-
-![API docs](img/docs.png)
-
-## How to Use It
-
-Click the **Use this template** button at the top of this page to create a new repository.
-
-## Backend Development
-
-Backend docs: [backend/README.md](./backend/README.md).
-
-## Frontend Development
-
-Frontend docs: [frontend/README.md](./frontend/README.md).
-
-## Deployment
-
-FastAPI Cloud deployment: [deployment.md](./deployment.md).
-
-Self-hosted deployment with Docker Compose: [deployment-docker-compose.md](./deployment-docker-compose.md).
-
-## Development
-
-General development docs: [development.md](./development.md).
-
-This includes the local FastAPI and Vite workflow, Docker Compose services, `.env` configuration, and more.
-
-## Release Notes
-
-Check the file [release-notes.md](./release-notes.md).
-
-## License
-
-The Full Stack FastAPI Template is licensed under the terms of the MIT license.
+# 核心业务流程
+查询事项
+→ 查看指南与材料清单
+→ 创建“材料准备记录”
+→ 填写办理情形/人员信息
+→ 按材料上传
+→ 单项模型检查
+→ 未通过则进入人工复核
+→ 通过后材料锁定
+→ 全部材料完成核查
+→ 生成准备包
+→ 携带材料到线下窗口正式办理

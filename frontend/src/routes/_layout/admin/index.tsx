@@ -11,7 +11,7 @@ import useAuth from "@/hooks/useAuth"
 
 export const Route = createFileRoute("/_layout/admin/")({
   component: AdminUsers,
-  head: () => ({ meta: [{ title: "用户管理 - 全栈 FastAPI 模板" }] }),
+  head: () => ({ meta: [{ title: "用户管理 - 哈哈快办" }] }),
 })
 
 function getUsersQueryOptions() {

@@ -14,7 +14,7 @@ export const Route = createFileRoute("/_layout/admin")({
   },
   head: () => ({
     meta: [
-      { title: "管理后台 - 全栈 FastAPI 模板" },
+      { title: "管理后台 - 哈哈快办" },
     ],
   }),
 })

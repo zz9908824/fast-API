@@ -51,7 +51,7 @@ export const Route = createFileRoute("/signup")({
   head: () => ({
     meta: [
       {
-        title: "注册 - 全栈 FastAPI 模板",
+        title: "注册 - 哈哈快办",
       },
     ],
   }),

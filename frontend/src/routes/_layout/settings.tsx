@@ -17,7 +17,7 @@ export const Route = createFileRoute("/_layout/settings")({
   head: () => ({
     meta: [
       {
-        title: "账户设置 - 全栈 FastAPI 模板",
+        title: "账户设置 - 哈哈快办",
       },
     ],
   }),
