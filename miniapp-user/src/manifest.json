@@ -1,0 +1,12 @@
+{
+  "name": "haha-kuaiban",
+  "appid": "__UNI__HAHA_KUAIBAN",
+  "description": "Government material preparation assistant",
+  "versionName": "0.1.0",
+  "versionCode": 101,
+  "mp-weixin": {
+    "appid": "",
+    "setting": { "urlCheck": true },
+    "usingComponents": true
+  }
+}

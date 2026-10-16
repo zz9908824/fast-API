@@ -18,9 +18,10 @@ export type Item = {
 
 interface MainProps {
   items: Item[]
+  label?: string
 }
 
-export function Main({ items }: MainProps) {
+export function Main({ items, label }: MainProps) {
   const { isMobile, setOpenMobile } = useSidebar()
   const router = useRouterState()
   const currentPath = router.location.pathname
@@ -32,15 +33,17 @@ export function Main({ items }: MainProps) {
   }
 
   return (
-    <SidebarGroup>
+    <SidebarGroup className="sidebar-nav-group">
+      {label && <div className="px-2 pb-2 text-[11px] font-semibold tracking-[0.12em] text-sidebar-foreground/50 group-data-[collapsible=icon]:hidden">{label}</div>}
       <SidebarGroupContent>
         <SidebarMenu>
           {items.map((item) => {
-            const isActive = currentPath === item.path
+            const isActive = item.path === "/" ? currentPath === "/" : currentPath === item.path || currentPath.startsWith(`${item.path}/`)
 
             return (
               <SidebarMenuItem key={item.title}>
                 <SidebarMenuButton
+                  className="sidebar-nav-button"
                   tooltip={item.title}
                   isActive={isActive}
                   asChild

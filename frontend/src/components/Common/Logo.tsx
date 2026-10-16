@@ -1,9 +1,7 @@
 import { Link } from "@tanstack/react-router"
+import { FileCheck2 } from "lucide-react"
 
-import { useTheme } from "@/components/theme-provider"
 import { cn } from "@/lib/utils"
-import icon from "/assets/images/fastapi-icon.svg"
-import iconLight from "/assets/images/fastapi-icon-light.svg"
 
 interface LogoProps {
   variant?: "full" | "icon" | "responsive"
@@ -11,34 +9,15 @@ interface LogoProps {
   asLink?: boolean
 }
 
-export function Logo({
-  variant = "full",
-  className,
-  asLink = true,
-}: LogoProps) {
-  const { resolvedTheme } = useTheme()
-  const iconLogo = resolvedTheme === "dark" ? iconLight : icon
-  const wordmark = <span className="font-sans text-[1.15rem] font-extrabold tracking-[-0.055em] text-[#009688]">哈哈快办</span>
-  const iconMark = <img src={iconLogo} alt="哈哈快办" className="size-6" />
-  const content =
-    variant === "responsive" ? (
-      <>
-        <span className={cn(
-            "flex items-center gap-2 group-data-[collapsible=icon]:hidden",
-            className,
-          )}>{iconMark}{wordmark}</span>
-        <span className={cn(
-            "hidden group-data-[collapsible=icon]:block",
-            className,
-          )}>{iconMark}</span>
-      </>
-    ) : (
-      <span className={cn(variant === "full" ? "flex items-center gap-2" : "inline-flex", className)}>{variant === "full" ? <>{iconMark}{wordmark}</> : iconMark}</span>
-    )
-
-  if (!asLink) {
-    return content
-  }
-
-  return <Link to="/">{content}</Link>
+export function Logo({ variant = "full", className, asLink = true }: LogoProps) {
+  const content = (
+    <span className={cn("inline-flex items-center gap-3", className)}>
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+        <FileCheck2 className="size-6" aria-hidden="true" />
+      </span>
+      {variant !== "icon" && <span className={cn("text-xl font-bold tracking-tight", variant === "responsive" && "group-data-[collapsible=icon]:hidden")}>哈哈快办</span>}
+      {variant === "icon" && <span className="sr-only">哈哈快办</span>}
+    </span>
+  )
+  return asLink ? <Link to="/" aria-label="哈哈快办首页">{content}</Link> : content
 }

@@ -1,6 +1,19 @@
 .vscode/*
 !.vscode/extensions.json
+
+# Local secrets and machine-specific settings
+.env
+.env.*
+!.env.example
+
+# JavaScript dependencies, build output, and npm cache
 node_modules/
+**/.npm-cache/
+**/dist/
+**/unpackage/
+**/.hbuilderx/
+**/project.private.config.json
+
 backend/app/frontend/
 /test-results/
 /playwright-report/

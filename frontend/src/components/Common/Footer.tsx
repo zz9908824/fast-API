@@ -1,12 +1,9 @@
 export function Footer() {
-  const currentYear = new Date().getFullYear()
-
   return (
-    <footer className="border-t py-4 px-6">
-      <div className="flex flex-col items-center justify-between gap-4 sm:flex-row">
-        <p className="text-muted-foreground text-sm">
-          哈哈快办 - {currentYear}
-        </p>
+    <footer className="border-t px-6 py-5 text-xs text-muted-foreground">
+      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2">
+        <p>© {new Date().getFullYear()} 哈哈快办</p>
+        <p>线上充分准备，线下从容办理</p>
       </div>
     </footer>
   )
