@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { applyMatterImport, startMatterImport, uploadMatterImport, type MatterImportInput } from "@/lib/matter-import-api"
 import { createDraftFromFinishedVersion, disableMatter, getFinishedMatterVersions, type FinishedMatterVersion } from "@/lib/admin-matters-api"
+import { MATTER_CATALOG_SECTIONS, categoriesForMatter, categoryById } from "@/lib/matter-catalog"
 
 export const Route = createFileRoute("/_layout/admin/matters")({ component: MatterAdmin })
 
@@ -32,6 +33,7 @@ function MatterAdmin() {
   const [importFiles, setImportFiles] = useState<File[]>([])
   const [importResult, setImportResult] = useState<Awaited<ReturnType<typeof startMatterImport>> | null>(null)
   const [keyword, setKeyword] = useState("")
+  const [categoryId, setCategoryId] = useState<string | null>(null)
   const { data: matters = [], isLoading, isError, error, isFetching, refetch } = useQuery({
     queryKey: ["finished-matter-versions", keyword], queryFn: () => getFinishedMatterVersions(keyword),
   })
@@ -74,15 +76,21 @@ function MatterAdmin() {
       disableCurrentMatter.mutate(matter)
     }
   }
+  const selectedCategory = categoryById(categoryId)
+  const visibleMatters = categoryId
+    ? matters.filter((matter) => categoriesForMatter(matter).some((category) => category.id === categoryId))
+    : matters
 
   return <div className="space-y-6">
     <header><h1 className="text-2xl font-bold">事项配置</h1><p className="mt-1 text-muted-foreground">展示已完成核验并发布的事项版本；可智能导入官方资料生成待复核草稿，或基于已发布版本创建修订草稿。</p></header>
     <div className="flex flex-wrap items-center gap-2"><Input className="w-full sm:w-80" value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索事项名称、事项编码、地区或办理地点" /><Button variant="outline" disabled={isFetching} onClick={() => refetch()}>查询</Button><Button variant="outline" disabled={isFetching} onClick={() => refetch()}><RefreshCw className={`mr-2 size-4 ${isFetching ? "animate-spin" : ""}`} />{isFetching ? "正在刷新…" : "刷新事项"}</Button><Button onClick={openImport}><Plus className="mr-2 size-4" />新增事项</Button></div>
+    <section className="rounded-xl border bg-muted/20 p-4"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div><h2 className="font-semibold">事项服务分类</h2><p className="mt-1 text-sm text-muted-foreground">按图片中的热门服务、个人生命周期和群体服务分类浏览已发布事项。分类根据事项名称与说明自动匹配。</p></div>{categoryId && <Button size="sm" variant="ghost" onClick={() => setCategoryId(null)}>清除分类</Button>}</div><div className="space-y-3">{MATTER_CATALOG_SECTIONS.map((section) => <div className="flex flex-wrap items-center gap-2" key={section.id}><span className="w-28 text-sm font-medium text-muted-foreground">{section.title}</span>{section.categories.map((category) => { const count = matters.filter((matter) => categoriesForMatter(matter).some((item) => item.id === category.id)).length; return <Button key={category.id} size="sm" variant={category.id === categoryId ? "default" : "outline"} onClick={() => setCategoryId(category.id === categoryId ? null : category.id)}>{category.label}<span className="ml-1 opacity-70">{count}</span></Button> })}</div>)}</div></section>
     {isLoading && <p className="text-muted-foreground">正在加载已发布事项…</p>}
     {isError && <p className="text-destructive">{error instanceof Error ? error.message : "已发布事项加载失败，请确认管理员登录状态和后端服务。"}</p>}
-    {!isLoading && !isError && matters.length === 0 && <div className="rounded-xl border border-dashed p-10 text-center text-muted-foreground">{keyword.trim() ? "未找到匹配的已发布事项。" : "当前没有状态为 finished 的已发布事项。"}</div>}
-    {!isLoading && !isError && matters.length > 0 && <div className="grid gap-4 md:grid-cols-2">{matters.map((matter) => <article className="rounded-xl border p-5" key={matter.version_id}>
+    {!isLoading && !isError && visibleMatters.length === 0 && <div className="rounded-xl border border-dashed p-10 text-center text-muted-foreground">{selectedCategory ? `“${selectedCategory.label}”分类暂未找到已发布事项。` : keyword.trim() ? "未找到匹配的已发布事项。" : "当前没有状态为 finished 的已发布事项。"}</div>}
+    {!isLoading && !isError && visibleMatters.length > 0 && <div className="grid gap-4 md:grid-cols-2">{visibleMatters.map((matter) => <article className="rounded-xl border p-5" key={matter.version_id}>
       <div className="flex items-start justify-between gap-3"><div><h2 className="font-semibold">{matter.name}</h2><p className="mt-1 text-sm text-muted-foreground">{matter.region_name} · 第 {matter.version_no} 版</p></div><Badge variant={matter.is_active ? "default" : "secondary"}>{matter.is_active ? "已发布 finished" : "已禁用"}</Badge></div>
+      {categoriesForMatter(matter).length > 0 && <div className="mt-3 flex flex-wrap gap-1">{categoriesForMatter(matter).map((category) => <Badge key={category.id} variant="outline" className="font-normal">{category.label}</Badge>)}</div>}
       <p className="mt-3 text-sm text-muted-foreground">{matter.description ?? "未填写事项说明"}</p>
       <div className="mt-4 space-y-1 text-sm text-muted-foreground"><p>事项编码：{matter.official_code ?? matter.code}</p><p>办理地点：{matter.location_name ?? "未配置"}</p><p>发布日期：{formatDate(matter.published_at)}</p></div>
       <div className="mt-5 grid grid-cols-3 gap-2 text-center text-xs"><MatterInfo icon={<FileText />} text={`材料要求 ${matter.material_count} 项`} /><MatterInfo icon={<ShieldCheck />} text={`获取方式 ${matter.acquisition_method_count} 项`} /><MatterInfo icon={<MapPin />} text={matter.location_name ? "已配置地点" : "未配置地点"} /></div>
